@@ -87,6 +87,7 @@ pre-fills it.
 ```
 node test/protocol.test.js            # transfer protocol, integrity checks, pairing codes
 node test/e2e.js                      # both pages in Chromium (needs Playwright), mock connection
+node test/portrait.js                 # tall photos/videos must fit the 600x600 display
 ```
 
 ## Files

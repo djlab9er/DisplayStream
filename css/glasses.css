@@ -171,13 +171,20 @@ button {
 .stage {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
+  overflow: hidden;
 }
+/*
+ * Size media against the screen, not against its own shape. (A grid item with height:100%
+ * collapses to "auto" for tall media, producing a 600x800 box that is clipped at the bottom.)
+ * Absolute + inset:0 gives a definite box; object-fit:contain letterboxes inside it.
+ */
 .stage img, .stage video {
+  position: absolute;
+  inset: 0;
   inline-size: 100%;
   block-size: 100%;
   object-fit: contain;
+  object-position: center;
   display: block;
 }
 .stage .glyph {
