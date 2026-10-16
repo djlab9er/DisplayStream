@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#0f1115">
+  <title>Send to glasses</title>
+  <link rel="stylesheet" href="css/send.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Send to glasses</h1>
+      <p class="sub">Pick photos and videos on this phone and they show up on your Meta Ray-Ban Display glasses.</p>
+    </header>
+
+    <section class="card" aria-labelledby="h-connect">
+      <h2 id="h-connect">1. Connect</h2>
+      <label for="code">Code shown on your glasses</label>
+      <div class="row">
+        <input id="code" type="text" inputmode="text" autocapitalize="characters" autocomplete="off"
+               autocorrect="off" spellcheck="false" maxlength="9" placeholder="ABCD-EFGH">
+        <button id="btn-connect" type="button" class="primary">Connect</button>
+      </div>
+      <p id="conn-status" class="chip" role="status" aria-live="polite">Not connected</p>
+    </section>
+
+    <section class="card" aria-labelledby="h-pick">
+      <h2 id="h-pick">2. Choose media</h2>
+      <input id="files" class="sr-only" type="file" accept="image/*,video/*" multiple>
+      <label for="files" class="pick">Choose photos &amp; videos</label>
+
+      <div class="row field">
+        <label for="quality">Photo size</label>
+        <select id="quality">
+          <option value="1200">Glasses (1200 px) · recommended</option>
+          <option value="2048">Large (2048 px)</option>
+          <option value="0">Original · biggest files</option>
+        </select>
+      </div>
+      <p class="note">Videos are sent unchanged. Keep this page open and the screen on while sending.</p>
+    </section>
+
+    <section id="queue-card" class="card" aria-labelledby="h-queue" hidden>
+      <div class="row between">
+        <h2 id="h-queue">Queue</h2>
+        <button id="btn-clear-done" type="button" class="ghost">Clear finished</button>
+      </div>
+      <ul id="queue" class="queue"></ul>
+    </section>
+  </main>
+
+  <noscript>This page needs JavaScript.</noscript>
+  <script src="js/config.js"></script>
+  <script src="js/peer-loader.js"></script>
+  <script src="js/shared.js"></script>
+  <script src="js/send.js"></script>
+</body>
+</html>

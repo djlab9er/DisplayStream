@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="application-name" content="Phone Gallery">
+  <title>Phone Gallery</title>
+  <link rel="stylesheet" href="css/glasses.css">
+</head>
+<body>
+  <div id="app">
+    <main id="home" class="screen">
+      <header class="bar">
+        <span id="dot" class="dot" aria-hidden="true"></span>
+        <span id="status" class="status" role="status" aria-live="polite">Starting…</span>
+        <span id="code-mini" class="code-mini" hidden></span>
+      </header>
+
+      <section id="pair" class="pair">
+        <p class="hint">On your phone, open</p>
+        <p id="send-url" class="url"></p>
+        <p class="hint">and enter this code</p>
+        <p id="code" class="code" aria-label="Pairing code">········</p>
+      </section>
+
+      <ul id="grid" class="grid" role="list" hidden></ul>
+
+      <footer class="actions">
+        <button type="button" id="btn-newcode">New code</button>
+        <button type="button" id="btn-clear" hidden>Clear all</button>
+      </footer>
+    </main>
+
+    <section id="viewer" class="screen" tabindex="-1" aria-label="Viewer" hidden>
+      <div id="stage" class="stage"></div>
+      <div id="caption" class="caption" aria-live="polite"></div>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </section>
+  </div>
+
+  <noscript>This app needs JavaScript.</noscript>
+  <script src="js/config.js"></script>
+  <script src="js/peer-loader.js"></script>
+  <script src="js/shared.js"></script>
+  <script src="js/glasses.js"></script>
+</body>
+</html>
