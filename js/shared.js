@@ -50,6 +50,10 @@
   function formatCode(code) { return code.slice(0, 4) + '-' + code.slice(4); }
   function peerId(code) { return PREFIX + code; }
 
+  // The Cast app uses its own prefix so it never collides with the gallery's peer id.
+  var CAST_PREFIX = 'pgcast-';
+  function castPeerId(code) { return CAST_PREFIX + code; }
+
   function newId() {
     var b = randomValues(3);
     return Date.now().toString(36) + '-' + b[0].toString(36) + b[1].toString(36) + b[2].toString(36);
@@ -194,6 +198,7 @@
     PREFIX: PREFIX, CODE_LEN: CODE_LEN, CHUNK: CHUNK, HIGH_WATER: HIGH_WATER,
     MAX_FILE: MAX_FILE, MAX_TOTAL: MAX_TOTAL,
     newCode: newCode, normalizeCode: normalizeCode, formatCode: formatCode, peerId: peerId,
+    CAST_PREFIX: CAST_PREFIX, castPeerId: castPeerId,
     newId: newId, sleep: sleep, waitDrain: waitDrain, sendItem: sendItem,
     Receiver: Receiver, formatBytes: formatBytes
   };

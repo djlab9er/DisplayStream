@@ -4,8 +4,14 @@
  * window.pgMakePeer(id) which applies js/config.js.
  */
 (function () {
+  // Resolve the local copy relative to THIS script (../vendor/), not the page, so pages in
+  // subfolders such as /cast/ find it too. document.currentScript is only set during execution.
+  var LOCAL = (document.currentScript && document.currentScript.src)
+    ? new URL('../vendor/peerjs.min.js', document.currentScript.src).href
+    : 'vendor/peerjs.min.js';
+
   var SOURCES = [
-    'vendor/peerjs.min.js',
+    LOCAL,
     'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js',
     'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js'
   ];

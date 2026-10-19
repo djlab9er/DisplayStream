@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Screen Cast – sender</title>
+  <style>
+    body{font-family:system-ui,sans-serif;max-width:32rem;margin:2rem auto;padding:0 1rem;line-height:1.4}
+    input{font:inherit;font-size:1.4rem;letter-spacing:.1em;text-transform:uppercase;padding:.4rem;width:100%;box-sizing:border-box}
+    button{font:inherit;padding:.6rem 1.2rem;margin:.5rem .5rem .5rem 0}
+    #msg{min-height:1.5rem;font-weight:600}
+  </style>
+</head>
+<body>
+  <h1>Cast your screen to the glasses</h1>
+  <p>Open <b>Screen Cast</b> on the glasses and type the code it shows. Works in desktop Chrome, Edge, Firefox and Safari (not Android browsers).</p>
+  <label for="code">Code</label>
+  <input id="code" autocomplete="off" maxlength="9" placeholder="ABCD-EFGH">
+  <div><button id="start" type="button">Start sharing</button><button id="stop" type="button" disabled>Stop</button></div>
+  <p id="msg" role="status" aria-live="polite"></p>
+  <p><small>Tip: share a window or tab with large text — the glasses display is 600×600.</small></p>
+  <script src="../js/config.js"></script>
+  <script src="../js/peer-loader.js"></script>
+  <script src="../js/shared.js"></script>
+  <script src="send.js"></script>
+</body>
+</html>
