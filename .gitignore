@@ -2,3 +2,4 @@ android-cast/.gradle/
 android-cast/build/
 android-cast/app/build/
 android-cast/local.properties
+test/out/

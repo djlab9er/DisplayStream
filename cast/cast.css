@@ -15,9 +15,9 @@ body { margin: 0; background: #000; color: #fff; overflow: hidden;
 button { font: inherit; color: #fff; padding: .45em 1.1em; background: #1b1b1b; border: 2px solid #fff;
   border-radius: 999px; cursor: pointer; }
 button:focus, button:focus-visible { outline: 4px solid #fff; outline-offset: 4px; }
-.screen { position: absolute; inset: 0; background: #000; }
+.screen { position: absolute; inset: 0; background: #000; overflow: hidden; }
 /* Absolute + inset:0 gives a definite box so tall/wide frames letterbox instead of overflowing. */
-#video { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; object-fit: contain; display: block; }
+#video { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; object-fit: contain; display: block; transform-origin: center center; }
 .toast { position: absolute; inset-inline: 16px; inset-block-start: 18px; padding: .35em .8em; border-radius: 14px;
   background: rgba(0,0,0,.82); border: 1px solid rgba(255,255,255,.6); text-align: center; opacity: 0;
   transition: opacity .2s ease; pointer-events: none; }
