@@ -36,7 +36,7 @@ class MainActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         }
         root.addView(codeInput)
-        start = Button(this).apply { text = "Start casting"; setOnClickListener { onStart() } }
+        start = Button(this).apply { text = "Start casting"; setOnClickListener { beginCast() } }
         stop = Button(this).apply {
             text = "Stop"
             setOnClickListener { startService(Intent(this@MainActivity, CastService::class.java).setAction(CastService.ACTION_STOP)) }
@@ -68,7 +68,7 @@ class MainActivity : Activity() {
         return if (c.length == 8 && c.all { it in alphabet }) c else null
     }
 
-    private fun onStart() {
+    private fun beginCast() {
         val code = normalize(codeInput.text.toString())
         if (code == null) { CastState.update("Enter the 8-character code from the glasses.", false); return }
         pendingCode = code
