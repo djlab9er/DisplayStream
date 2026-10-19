@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "Screen Cast",
+  "description": "Show a screen shared from your computer or phone.",
+  "appearance": {
+    "theme_color": "#3867D6",
+    "icon": { "src": "../icons/cast.svg", "type": "monochrome" }
+  }
+}

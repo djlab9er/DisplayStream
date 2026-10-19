@@ -82,6 +82,16 @@ pre-fills it.
 | Photo fails with "Unsupported image format" | Choose a JPEG/PNG; HEIC from some sources can't be decoded by the browser |
 | Video shows ! | Codec not supported on the glasses; convert to H.264 MP4 |
 
+## Screen Cast (experimental)
+
+A second glasses web app, **Screen Cast**, shows a live screen shared from another device.
+
+- Glasses launch URL: `https://djlab9er.github.io/DisplayStream/cast/` (add it in the Meta AI app as a second web app, same steps as the gallery).
+- The glasses show a code. On a **desktop** browser open `.../cast/send.html`, enter the code and pick a screen/window/tab to share.
+- **Android phones**: Chrome cannot capture the screen, so a native app is needed. See [docs/ANDROID_CAST_SPEC.md](docs/ANDROID_CAST_SPEC.md).
+- Video only, one sender at a time (extra senders are ignored; senders time out after 20 s with no answer). Calls are auto-accepted: anyone who knows the current code could cast to your glasses, so use "New code" if in doubt.
+- Untested on real hardware so far. Tests: `node test/cast.js`.
+
 ## Tests
 
 ```

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="application-name" content="Screen Cast">
+  <title>Screen Cast</title>
+  <link rel="stylesheet" href="cast.css">
+</head>
+<body>
+  <div id="app">
+    <section id="pair" class="pair">
+      <p id="status" class="status" role="status" aria-live="polite">Starting…</p>
+      <p class="hint">On your computer, open</p>
+      <p id="send-url" class="url"></p>
+      <p class="hint">and enter this code</p>
+      <p id="code" class="code" aria-label="Pairing code">········</p>
+      <button type="button" id="btn-newcode">New code</button>
+    </section>
+
+    <section id="screen" class="screen" hidden>
+      <video id="video" autoplay playsinline muted></video>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </section>
+  </div>
+  <noscript>This app needs JavaScript.</noscript>
+  <script src="../js/config.js"></script>
+  <script src="../js/peer-loader.js"></script>
+  <script src="../js/shared.js"></script>
+  <script src="cast.js"></script>
+</body>
+</html>
