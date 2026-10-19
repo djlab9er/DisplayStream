@@ -19,7 +19,7 @@ jobs:
           gradle --no-daemon assembleDebug > build.log 2>&1
           code=$?
           if [ $code -ne 0 ]; then
-            grep -E "^e: |error:|What went wrong|Could not|Execution failed|> " build.log | head -25 | while IFS= read -r l; do echo "::error::${l:0:380}"; done
+            grep -E -A6 "^e: |error:|What went wrong|FAILED" build.log | grep -v "^> Task" | head -25 | while IFS= read -r l; do echo "::error::${l:0:380}"; done
           fi
           exit $code
       - uses: actions/upload-artifact@v4
