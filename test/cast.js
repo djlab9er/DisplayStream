@@ -45,6 +45,7 @@ const videoPlaying = (page) => page.waitForFunction(() => { const v = document.g
   const ctx = await browser.newContext({ viewport: { width: 600, height: 600 } });
 
   const rx = await ctx.newPage();
+  if (process.env.FORCE_FALLBACK) await rx.addInitScript(() => { const o = CSS.supports.bind(CSS); CSS.supports = (a, b) => (a === 'object-view-box' ? false : o(a, b)); });
   const errs = []; rx.on('pageerror', (e) => errs.push(String(e)));
   await rx.goto(base + '/cast/');
   await rx.waitForFunction(() => /Waiting/.test(document.getElementById('status').textContent));
@@ -83,47 +84,93 @@ const videoPlaying = (page) => page.waitForFunction(() => { const v = document.g
   });
 
 
+  const FALLBACK = !!process.env.FORCE_FALLBACK;     // FORCE_FALLBACK=1: exercise the transform path
   const vstate = () => rx.evaluate(() => {
     const v = document.getElementById('video'); const b = v.getBoundingClientRect();
-    return { t: v.style.transform, l: b.left, tp: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height };
+    const ovb = v.style.objectViewBox || '';
+    const nums = (str, re) => { const m = re.exec(str || ''); return m ? m[1].split(/[\s,]+/).filter(Boolean).map((x) => parseFloat(x)) : null; };
+    let ins = nums(ovb, /inset\(([^)]*)\)/);
+    if (ins) { const [a1, b1, c1, d1] = ins;                      // CSS shorthand: 1-4 values
+      ins = ins.length === 1 ? [a1, a1, a1, a1] : ins.length === 2 ? [a1, b1, a1, b1] : ins.length === 3 ? [a1, b1, c1, b1] : [a1, b1, c1, d1]; }
+    const tv = nums(v.style.transform, /translate\(([^)]*)\)/), zv = nums(v.style.transform, /scale\(([^)]*)\)/);
+    return { ovb, t: v.style.transform || '',
+      inset: ins ? { t: ins[0], r: ins[1], b: ins[2], l: ins[3] } : null,
+      tr: tv && zv ? { x: tv[0], y: tv[1], z: zv[0] } : null,
+      vw: v.videoWidth, vh: v.videoHeight, w: b.width, h: b.height, left: b.left, top: b.top };
   });
-  await check('Enter zooms a tall phone screen to fill the square (starts at the top)', async () => {
+  const region = (s) => ({ w: s.vw - s.inset.l - s.inset.r, h: s.vh - s.inset.t - s.inset.b });
+  const isFit = (s) => s.ovb === '' && s.t === '';
+
+  await check('Enter zooms a tall phone screen to fill the square, starting at the top', async () => {
     await rx.keyboard.press('Enter');
     const s = await vstate();
-    assert.match(s.t, /scale\(/);
-    // Zoomed box must be wider than the viewport and extend past it; top edge of content visible.
-    assert.ok(s.w > 600 + 1 || s.h > 600 + 1, JSON.stringify(s));
-    assert.ok(s.tp >= -1 && s.tp <= 1 || s.tp > -1, 'top aligned: ' + s.tp);
+    assert.equal(isFit(s), false);
+    // The element itself must never grow beyond the display (a huge scaled layer rendered black on the glasses).
+    if (!FALLBACK) {
+      assert.ok(s.inset, 'object-view-box set: ' + s.ovb);
+      assert.ok(s.w <= 600.5 && s.h <= 600.5, 'element stays display-sized: ' + s.w + 'x' + s.h);
+      const r = region(s);
+      assert.ok(Math.abs(r.w / r.h - 1) < 0.02, 'visible region is square: ' + r.w + 'x' + r.h);
+      assert.ok(r.h < s.vh - 1 && r.w <= s.vw + 0.5, 'shows the full width, crops the height of a tall frame');
+      assert.ok(s.inset.t < 0.5, 'starts at the top: ' + s.inset.t);
+    } else {
+      assert.ok(s.tr && s.tr.z > 1 && s.tr.z <= 2.5001, 'capped scale: ' + s.t);
+    }
     await rx.screenshot({ path: path.join(OUT, 'cast-zoom1.png') });
   });
-  await check('Down arrow pans the view down; Up pans back; clamped at the ends', async () => {
+  await check('Down pans the view down, Up pans back, both clamp at the ends', async () => {
     const a = await vstate();
     await rx.keyboard.press('ArrowDown');
     const b = await vstate();
-    assert.ok(b.tp < a.tp, 'content moved up: ' + a.tp + ' -> ' + b.tp);
-    for (let i = 0; i < 30; i++) await rx.keyboard.press('ArrowDown');
+    if (!FALLBACK) assert.ok(b.inset.t > a.inset.t, 'view moved down: ' + a.inset.t + ' -> ' + b.inset.t);
+    else assert.ok(b.tr.y < a.tr.y, 'content moved up: ' + a.tr.y + ' -> ' + b.tr.y);
+    for (let i = 0; i < 60; i++) await rx.keyboard.press('ArrowDown');
     const end = await vstate();
-    assert.ok(end.b >= 599, 'bottom edge reaches the viewport bottom, got ' + end.b);
-    for (let i = 0; i < 60; i++) await rx.keyboard.press('ArrowUp');
+    if (!FALLBACK) assert.ok(end.inset.b < 0.5 && end.inset.t > 0, 'bottom clamp: ' + JSON.stringify(end.inset));
+    for (let i = 0; i < 120; i++) await rx.keyboard.press('ArrowUp');
     const top = await vstate();
-    assert.ok(top.tp <= 1 && top.tp >= -1 || top.tp > -1, 'top clamp: ' + top.tp);
-    assert.ok(top.tp <= 1, 'content top at viewport top, got ' + top.tp);
+    if (!FALLBACK) assert.ok(top.inset.t < 0.5, 'top clamp: ' + top.inset.t);
+    // Left/Right pan horizontally (at Zoom 1 on a tall frame the width is already cropped, so it can move).
+    const h0 = await vstate();
+    for (let i = 0; i < 40; i++) await rx.keyboard.press('ArrowRight');
+    const h1 = await vstate();
+    if (!FALLBACK) assert.ok(h1.inset.l > h0.inset.l - 0.001 && h1.inset.r < 0.5, 'right clamp: ' + JSON.stringify(h1.inset));
+    for (let i = 0; i < 80; i++) await rx.keyboard.press('ArrowLeft');
+    const h2 = await vstate();
+    if (!FALLBACK) assert.ok(h2.inset.l < 0.5, 'left clamp: ' + JSON.stringify(h2.inset));
     await rx.screenshot({ path: path.join(OUT, 'cast-zoom-top.png') });
   });
-  await check('second Enter zooms further, third returns to fit', async () => {
-    const z1 = (await vstate()).w;
+  await check('Zoom 2 shows a smaller region and is still reachable with arrows', async () => {
+    const z1 = await vstate();
     await rx.keyboard.press('Enter');
-    const z2 = (await vstate()).w;
-    assert.ok(z2 > z1 * 1.3, z1 + ' -> ' + z2);
+    const z2 = await vstate();
+    assert.equal(isFit(z2), false, 'not blank/fit at zoom 2');
+    if (!FALLBACK) {
+      assert.ok(z2.w <= 600.5 && z2.h <= 600.5, 'element stays display-sized');
+      const r1 = region(z1), r2 = region(z2);
+      assert.ok(Math.abs(r1.w / r2.w - 1.5) < 0.05, 'region shrinks 1.5x: ' + r1.w + ' -> ' + r2.w);
+      // The visible region must lie inside the frame (this is what "all black" would violate).
+      assert.ok(z2.inset.t >= -0.01 && z2.inset.l >= -0.01 && z2.inset.r >= -0.01 && z2.inset.b >= -0.01, JSON.stringify(z2.inset));
+      for (let i = 0; i < 60; i++) await rx.keyboard.press('ArrowDown');
+      const e = await vstate();
+      assert.ok(e.inset.t > z2.inset.t && e.inset.b >= -0.01 && e.inset.b < 0.5, 'pans to the bottom: ' + JSON.stringify(e.inset));
+      for (let i = 0; i < 120; i++) await rx.keyboard.press('ArrowUp');
+    } else {
+      assert.ok(z2.tr.z <= 2.5001, 'capped: ' + z2.t);
+    }
+    await rx.screenshot({ path: path.join(OUT, 'cast-zoom2.png') });
+  });
+  await check('third Enter returns to fit', async () => {
     await rx.keyboard.press('Enter');
     const s = await vstate();
-    assert.equal(s.t, '');
-    assert.ok(s.l >= -1 && s.r <= 601 && s.tp >= -1 && s.b <= 601, JSON.stringify(s));
+    assert.ok(isFit(s), JSON.stringify(s));
+    assert.ok(s.left >= -1 && s.top >= -1 && s.w <= 600.5 && s.h <= 600.5);
   });
-  await check('arrows do nothing at fit; zoom resets for the next cast', async () => {
+  await check('arrows do nothing at fit; Enter zooms again', async () => {
     await rx.keyboard.press('ArrowDown');
-    assert.equal((await vstate()).t, '');
+    assert.ok(isFit(await vstate()));
     await rx.keyboard.press('Enter');
+    assert.equal(isFit(await vstate()), false);
   });
 
   await check('a second sender is turned away while busy', async () => {
@@ -146,7 +193,7 @@ const videoPlaying = (page) => page.waitForFunction(() => { const v = document.g
   await check('glasses can accept a new cast after the first ends (zoom reset to fit)', async () => {
     await tx.fill('#code', code); await tx.click('#start');
     await videoPlaying(rx);
-    assert.equal((await vstate()).t, '');
+    assert.ok(isFit(await vstate()));
   });
 
   await check('Back (Escape) ends the cast on the glasses', async () => {
