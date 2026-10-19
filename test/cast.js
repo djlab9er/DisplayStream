@@ -28,10 +28,11 @@ async function check(name, fn) {
   catch (e) { failures++; console.log('  FAIL ' + name + '\n       ' + String(e && e.message || e).split('\n').slice(0, 3).join(' | ')); }
 }
 // Fake "screen": animated canvas stream, installed as getDisplayMedia.
-const FAKE = () => {
+const FAKE = (dims) => {
+  const D = dims || { w: 640, h: 360 };
   navigator.mediaDevices.getDisplayMedia = async () => {
-    const c = document.createElement('canvas'); c.width = 640; c.height = 360; const x = c.getContext('2d'); let n = 0;
-    setInterval(() => { x.fillStyle = `hsl(${(n += 7) % 360},80%,50%)`; x.fillRect(0, 0, 640, 360); x.fillStyle = '#fff'; x.font = '60px sans-serif'; x.fillText('CAST ' + n, 40, 200); }, 50);
+    const c = document.createElement('canvas'); c.width = D.w; c.height = D.h; const x = c.getContext('2d'); let n = 0;
+    setInterval(() => { x.fillStyle = `hsl(${(n += 7) % 360},80%,50%)`; x.fillRect(0, 0, 640, 360); x.fillStyle = '#fff'; x.font = '60px sans-serif'; x.fillText('CAST ' + n, 20, 200); }, 50);
     return c.captureStream(20);
   };
 };
@@ -57,7 +58,7 @@ const videoPlaying = (page) => page.waitForFunction(() => { const v = document.g
 
   const tx = await ctx.newPage();
   tx.on('pageerror', (e) => errs.push(String(e)));
-  await tx.addInitScript(FAKE);
+  await tx.addInitScript(FAKE, { w: 360, h: 780 });   // tall, like a phone
   await tx.goto(base + '/cast/send.html');
 
   await check('sender rejects a malformed code', async () => {
@@ -71,6 +72,7 @@ const videoPlaying = (page) => page.waitForFunction(() => { const v = document.g
     await videoPlaying(rx);
     assert.equal(await rx.evaluate(() => document.getElementById('screen').hidden), false);
     assert.equal(await rx.evaluate(() => document.getElementById('pair').hidden), true);
+    await rx.waitForTimeout(1500);
     await rx.screenshot({ path: path.join(OUT, 'cast-playing.png') });
     assert.match(await tx.textContent('#msg'), /Casting/);
   });
@@ -78,6 +80,50 @@ const videoPlaying = (page) => page.waitForFunction(() => { const v = document.g
   await check('video is letterboxed inside 600x600', async () => {
     const r = await rx.evaluate(() => { const b = document.getElementById('video').getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom]; });
     assert.ok(r[0] >= 0 && r[1] >= 0 && r[2] <= 600.5 && r[3] <= 600.5, JSON.stringify(r));
+  });
+
+
+  const vstate = () => rx.evaluate(() => {
+    const v = document.getElementById('video'); const b = v.getBoundingClientRect();
+    return { t: v.style.transform, l: b.left, tp: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height };
+  });
+  await check('Enter zooms a tall phone screen to fill the square (starts at the top)', async () => {
+    await rx.keyboard.press('Enter');
+    const s = await vstate();
+    assert.match(s.t, /scale\(/);
+    // Zoomed box must be wider than the viewport and extend past it; top edge of content visible.
+    assert.ok(s.w > 600 + 1 || s.h > 600 + 1, JSON.stringify(s));
+    assert.ok(s.tp >= -1 && s.tp <= 1 || s.tp > -1, 'top aligned: ' + s.tp);
+    await rx.screenshot({ path: path.join(OUT, 'cast-zoom1.png') });
+  });
+  await check('Down arrow pans the view down; Up pans back; clamped at the ends', async () => {
+    const a = await vstate();
+    await rx.keyboard.press('ArrowDown');
+    const b = await vstate();
+    assert.ok(b.tp < a.tp, 'content moved up: ' + a.tp + ' -> ' + b.tp);
+    for (let i = 0; i < 30; i++) await rx.keyboard.press('ArrowDown');
+    const end = await vstate();
+    assert.ok(end.b >= 599, 'bottom edge reaches the viewport bottom, got ' + end.b);
+    for (let i = 0; i < 60; i++) await rx.keyboard.press('ArrowUp');
+    const top = await vstate();
+    assert.ok(top.tp <= 1 && top.tp >= -1 || top.tp > -1, 'top clamp: ' + top.tp);
+    assert.ok(top.tp <= 1, 'content top at viewport top, got ' + top.tp);
+    await rx.screenshot({ path: path.join(OUT, 'cast-zoom-top.png') });
+  });
+  await check('second Enter zooms further, third returns to fit', async () => {
+    const z1 = (await vstate()).w;
+    await rx.keyboard.press('Enter');
+    const z2 = (await vstate()).w;
+    assert.ok(z2 > z1 * 1.3, z1 + ' -> ' + z2);
+    await rx.keyboard.press('Enter');
+    const s = await vstate();
+    assert.equal(s.t, '');
+    assert.ok(s.l >= -1 && s.r <= 601 && s.tp >= -1 && s.b <= 601, JSON.stringify(s));
+  });
+  await check('arrows do nothing at fit; zoom resets for the next cast', async () => {
+    await rx.keyboard.press('ArrowDown');
+    assert.equal((await vstate()).t, '');
+    await rx.keyboard.press('Enter');
   });
 
   await check('a second sender is turned away while busy', async () => {
@@ -97,9 +143,10 @@ const videoPlaying = (page) => page.waitForFunction(() => { const v = document.g
     assert.match(await rx.textContent('#status'), /ended|Waiting/);
   });
 
-  await check('glasses can accept a new cast after the first ends', async () => {
+  await check('glasses can accept a new cast after the first ends (zoom reset to fit)', async () => {
     await tx.fill('#code', code); await tx.click('#start');
     await videoPlaying(rx);
+    assert.equal((await vstate()).t, '');
   });
 
   await check('Back (Escape) ends the cast on the glasses', async () => {
