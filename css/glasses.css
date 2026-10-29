@@ -237,14 +237,33 @@ button {
 }
 .caption .meta { display: block; opacity: .8; font-size: .8em; }
 
+/* Video transport (progress + time), shown above the caption. */
+.transport {
+  position: absolute;
+  inset-inline: 16px;
+  inset-block-end: 96px;
+  padding: .45em .8em .35em;
+  border-radius: 14px;
+  background: rgba(0,0,0,.82);
+  border: 1px solid rgba(255,255,255,.6);
+  opacity: 0;
+  transition: opacity .2s ease;
+  pointer-events: none;
+}
+.transport.show { opacity: 1; }
+.transport .track { block-size: 8px; border-radius: 4px; background: rgba(255,255,255,.28); overflow: hidden; }
+.transport .track i { display: block; block-size: 100%; inline-size: 0; background: #fff; }
+.transport .tinfo { display: flex; justify-content: space-between; gap: 12px; margin-block-start: .3em; font-size: .8em; font-variant-numeric: tabular-nums; }
+
 /* Delete menu: bounded pills on black, over the lower part of the viewer. */
 .menu {
   position: absolute;
   inset-inline: 16px;
   inset-block-end: 18px;
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
-  gap: 14px;
+  gap: 10px 12px;
   padding: 12px;
   border-radius: 20px;
   background: rgba(0,0,0,.9);
@@ -260,6 +279,6 @@ button {
 .menu button:focus { background: #fff; color: #000; }
 
 @media (prefers-reduced-motion: reduce) {
-  .caption, .toast { transition: none; }
+  .caption, .toast, .transport { transition: none; }
   .tile:focus { transform: none; }
 }

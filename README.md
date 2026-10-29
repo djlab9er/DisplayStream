@@ -49,11 +49,12 @@ pre-fills it.
 | Where | Input | Does |
 |---|---|---|
 | Grid | arrows / Enter | move between thumbnails / open |
-| Viewer | ◀ ▶ | previous / next (wraps around) |
-| Viewer | Enter | video: play/pause. Photo: **zoom** — Fit → Zoom 1 (fills the square) → Zoom 2 → Fit |
+| Viewer (photo) | ◀ ▶ | previous / next (wraps around) |
+| Viewer (video) | ◀ ▶ | skip back / ahead 10 s (change with `SEEK_SECONDS` in `js/config.js`); the progress bar and time appear |
+| Viewer | Enter | video: play/pause (also replays a finished video). Photo: **zoom** — Fit → Zoom 1 (fills the square) → Zoom 2 → Fit |
 | Viewer, zoomed | ◀ ▶ ▲ ▼ | pan around the photo (to change photo, zoom back out to Fit first) |
-| Viewer | ▲ | pin or hide the filename caption |
-| Viewer | ▼ | open the options menu: **Keep** (default) **Delete this** or **Slideshow** (5 s per photo; ◀ ▶ to choose, Enter to confirm, ▲ ▼ to close) |
+| Viewer | ▲ | pin or hide the caption (and the video progress bar) |
+| Viewer | ▼ | open the options menu: **Keep** (default) **Delete this** or **Slideshow**; for videos also **Speed** (0.5× / 1× / 1.5× / 2×), **Sound** on/off, **Previous** and **Next** (5 s per photo; ◀ ▶ to choose, Enter to confirm, ▲ ▼ to close) |
 | Anywhere | Back | viewer → grid; grid → exits the app |
 
 **Clear all** (press twice) deletes everything on the glasses, including saved copies. **New code** replaces the pairing code.
@@ -117,6 +118,7 @@ node test/portrait.js                 # tall photos/videos must fit the 600x600 
 node test/photozoom.js                # photo zoom and pan (FORCE_FALLBACK=1 tests the fallback path)
 node test/compress.test.js            # video shrink planner (sizes, bitrates, limits)
 node test/video.js                    # shrinking videos in the browser against tiny glasses limits (real time)
+node test/player.js                   # video controls: seek, progress, speed, sound, previous/next
 node test/saved.js                    # saved photos: reload, delete menu, Clear all, and every storage fallback
 node test/cast.js                     # Screen Cast receiver and sender
 ```

@@ -13,6 +13,9 @@ window.PG_CONFIG = {
   // MAX_FILE_MB: 150,
   // MAX_TOTAL_MB: 300,
 
+  // Video player: seconds skipped by each left/right swipe.
+  // SEEK_SECONDS: 10,
+
   ICE_SERVERS: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' }

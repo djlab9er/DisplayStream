@@ -145,7 +145,10 @@ function check(name, fn) {
     await glasses.keyboard.press('ArrowLeft');
     await glasses.keyboard.press('ArrowLeft');
     assert.match(await glasses.textContent('#caption .meta'), /4 \/ 4/);
-    await glasses.keyboard.press('ArrowRight');
+    // item 4 is the video: there Right/Left seek, so wrap around with the menu's Next button
+    await glasses.keyboard.press('ArrowDown');
+    for (let i = 0; i < 5; i++) await glasses.keyboard.press('ArrowRight');
+    await glasses.keyboard.press('Enter');
     assert.match(await glasses.textContent('#caption .meta'), /1 \/ 4/);
   });
   await check('small JPEG passed through untouched (same bytes)', async () => {
