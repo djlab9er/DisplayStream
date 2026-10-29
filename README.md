@@ -51,10 +51,11 @@ pre-fills it.
 | Grid | arrows / Enter | move between thumbnails / open |
 | Viewer | ◀ ▶ | previous / next (wraps around) |
 | Viewer | Enter | play/pause a video; on photos, start/stop a 5 s slideshow |
-| Viewer | ▲ ▼ | pin or hide the filename caption |
+| Viewer | ▲ | pin or hide the filename caption |
+| Viewer | ▼ | open the options menu: **Keep** (default) or **Delete this** (◀ ▶ to choose, Enter to confirm, ▲ ▼ to close) |
 | Anywhere | Back | viewer → grid; grid → exits the app |
 
-**Clear all** (press twice) frees the glasses' memory. **New code** replaces the pairing code.
+**Clear all** (press twice) deletes everything on the glasses, including saved copies. **New code** replaces the pairing code.
 
 ## Things to know
 
@@ -66,8 +67,14 @@ pre-fills it.
   transfers quick. Choose *Original* on the phone for full size.
 - **Videos are sent unchanged.** The glasses can only play formats their browser supports. MP4 (H.264)
   and WebM are the safest bet; some iPhone HEVC `.mov` files may not play. The app says so if playback fails.
-- **Memory only.** Media lives in the glasses' memory for the session (limits: 150 MB per file,
-  300 MB total) and is gone when the app restarts. Send again, or keep the phone page handy.
+- **Saved photos.** Everything you send is kept on the glasses and comes back the next time you open
+  the app (limits: 150 MB per file, 300 MB total, and whatever space the glasses' browser allows).
+  The home screen says *Saved on glasses* and the phone page shows *Saved on glasses* or *Not saved*
+  for each file. Storage is tried in this order, each verified with a real write-and-read before use:
+  IndexedDB, then Cache Storage, then memory only. Meta's docs don't promise that IndexedDB persists on
+  the glasses, so if neither works the app says *Not saved when the app closes* and behaves as before.
+  If the glasses' storage fills up, the file still shows for the session and the phone says it wasn't saved.
+  Delete one photo from the viewer (▼ menu) or everything with **Clear all**.
 - **The code is a shared secret.** Anyone who knows the current code can send to your glasses while the
   app is open. Tap **New code** if it leaks.
 - The phone page must stay open and awake while sending. It requests a screen wake lock where supported.
@@ -98,12 +105,14 @@ A second glasses web app, **Screen Cast**, shows a live screen shared from anoth
 node test/protocol.test.js            # transfer protocol, integrity checks, pairing codes
 node test/e2e.js                      # both pages in Chromium (needs Playwright), mock connection
 node test/portrait.js                 # tall photos/videos must fit the 600x600 display
+node test/saved.js                    # saved photos: reload, delete menu, Clear all, and every storage fallback
+node test/cast.js                     # Screen Cast receiver and sender
 ```
 
 ## Files
 
 ```
-index.html  css/glasses.css  js/glasses.js      glasses app
+index.html  css/glasses.css  js/glasses.js  js/storage.js   glasses app (storage.js keeps saved photos)
 send.html   css/send.css     js/send.js         phone page
 js/shared.js    protocol + pairing codes        js/peer-loader.js   loads PeerJS (local, then CDN)
 js/config.js    TURN / own broker settings

@@ -120,6 +120,10 @@
       if (typeof msg.free === 'number') free = msg.free;
       var p = pendingAcks[msg.id];
       if (p) { delete pendingAcks[msg.id]; p.resolve(msg); }
+    } else if (msg.t === 'saved') {
+      if (typeof msg.free === 'number') free = msg.free;
+      var q = queue.find(function (x) { return x.id === msg.id; });
+      if (q) { q.saved = !!msg.ok; q.savedReason = msg.ok ? '' : (msg.reason || ''); updateRow(q); }
     }
   }
 
@@ -337,7 +341,7 @@
       case 'queued': return size + ' · ' + (item.note || 'Queued');
       case 'preparing': return size + ' · Preparing…';
       case 'sending': return size + ' · Sending ' + Math.round((item.progress || 0) * 100) + '%';
-      case 'done': return size + ' · Sent';
+      case 'done': return size + ' · Sent' + (item.saved === true ? ' · Saved on glasses' : item.saved === false ? ' · Not saved' + (item.savedReason ? ' (' + item.savedReason + ')' : '') : '');
       case 'failed': return item.error || 'Failed';
       default: return size;
     }

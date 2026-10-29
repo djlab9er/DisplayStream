@@ -137,8 +137,16 @@ body {
 
 .actions {
   display: flex;
-  justify-content: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.actions .btns { display: flex; justify-content: center; gap: 12px; }
+.store-info {
+  margin: 0;
+  font-size: .72em;
+  opacity: .75;
+  text-align: center;
 }
 button {
   font: inherit;
@@ -227,6 +235,28 @@ button {
   white-space: nowrap;
 }
 .caption .meta { display: block; opacity: .8; font-size: .8em; }
+
+/* Delete menu: bounded pills on black, over the lower part of the viewer. */
+.menu {
+  position: absolute;
+  inset-inline: 16px;
+  inset-block-end: 18px;
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  padding: 12px;
+  border-radius: 20px;
+  background: rgba(0,0,0,.9);
+  border: 1px solid rgba(255,255,255,.6);
+}
+.menu button {
+  padding: .45em 1.1em;
+  background: #1b1b1b;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.menu button:focus { background: #fff; color: #000; }
 
 @media (prefers-reduced-motion: reduce) {
   .caption, .toast { transition: none; }
