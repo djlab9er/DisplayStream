@@ -7,10 +7,12 @@ import android.os.Looper
 object CastState {
     @Volatile var status: String = "Idle"
     @Volatile var active: Boolean = false
+    @Volatile var paused: Boolean = false       // capture stopped by Android (phone locked); call kept open
+    @Volatile var lastCode: String? = null
     var listener: (() -> Unit)? = null
     private val main = Handler(Looper.getMainLooper())
-    fun update(text: String, isActive: Boolean = active) {
-        status = text; active = isActive
+    fun update(text: String, isActive: Boolean = active, isPaused: Boolean = false) {
+        status = text; active = isActive; paused = isPaused && isActive
         main.post { listener?.invoke() }
     }
 }
