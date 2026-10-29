@@ -143,3 +143,12 @@ etc. lists **Send to glasses**. The app opens, reconnects with the last code, an
 (shrinking videos as usual). Open Phone Gallery on the glasses first. The glasses code is
 remembered; if it changed, type the new one. `sw.js` only handles the share hand-off and caches
 nothing else. Test: `node test/share.js`.
+
+## Cast: saved code, quick-settings tile, auto-reconnect
+
+The glasses keep the same Screen Cast code until you press **New code** (stored in the glasses
+browser). The Android app remembers it too, so you type it once. Add the **Cast to glasses** tile
+(swipe down → edit → drag it in); tap to start, tap to stop. If the link drops (Wi-Fi blip, glasses
+reopened) the app redials the same code up to 8 times; a reconnecting phone replaces its own dead
+call on the glasses, while a second phone is still turned away during a live cast.
+Tests: `node test/castcode.js`.
