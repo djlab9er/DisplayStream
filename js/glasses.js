@@ -14,14 +14,18 @@
   var els = {
     home: $('home'), viewer: $('viewer'), stage: $('stage'), caption: $('caption'), toast: $('toast'),
     dot: $('dot'), status: $('status'), codeMini: $('code-mini'), pair: $('pair'), code: $('code'),
-    sendUrl: $('send-url'), grid: $('grid'), btnNew: $('btn-newcode'), btnClear: $('btn-clear')
+    sendUrl: $('send-url'), grid: $('grid'), btnNew: $('btn-newcode'), btnClear: $('btn-clear'),
+    storeInfo: $('store-info'), menu: $('menu'), btnKeep: $('btn-menu-keep'), btnDelete: $('btn-menu-delete')
   };
 
   var CODE_KEY = 'pgal.code';
   var SLIDE_MS = 5000;
 
+  var storeReady = false;
   var items = [];
   var usedBytes = 0;
+  var persistent = false;      // true once PGStore picked a real backend
+  var storageFree = null;      // bytes the browser says we may still store (null = unknown)
   var current = -1;
 
   var code = null;
@@ -47,7 +51,17 @@
     var s = Math.round(sec), m = Math.floor(s / 60);
     return m + ':' + String(s % 60).padStart(2, '0');
   }
-  function freeBytes() { return Math.max(0, PG.MAX_TOTAL - usedBytes); }
+  function freeBytes() {
+    var f = PG.MAX_TOTAL - usedBytes;
+    if (persistent && storageFree != null) f = Math.min(f, storageFree);
+    return Math.max(0, f);
+  }
+  function refreshStorageFree() {
+    if (!persistent) return Promise.resolve();
+    return PGStore.estimate().then(function (e) {
+      storageFree = e ? Math.max(0, e.quota - e.usage) : null;
+    }, function () { storageFree = null; });
+  }
 
   function toast(text, ms) {
     els.toast.textContent = text;
@@ -76,6 +90,17 @@
     els.btnClear.hidden = !has;
     els.codeMini.textContent = code ? PG.formatCode(code) : '';
     els.code.textContent = code ? PG.formatCode(code) : '········';
+    renderStoreInfo();
+  }
+
+  function renderStoreInfo() {
+    var t = '';
+    if (!storeReady) t = '';
+    else if (!persistent) t = 'Not saved when the app closes';
+    else if (items.length) t = 'Saved on glasses · ' + PG.formatBytes(usedBytes);
+    else t = 'Photos you send are saved here';
+    els.storeInfo.textContent = t;
+    els.storeInfo.hidden = !t;
   }
 
   // ---------- pairing code ----------
@@ -104,22 +129,86 @@
     },
     onItem: function (meta, blob, thumb) {
       if (items.some(function (it) { return it.id === meta.id; })) return;
-      var item = {
-        id: meta.id, name: meta.name || 'Untitled', kind: meta.kind === 'video' ? 'video' : 'photo',
-        mime: meta.mime, size: blob.size, w: meta.w, h: meta.h, duration: meta.duration,
-        url: URL.createObjectURL(blob), thumbUrl: thumb ? URL.createObjectURL(thumb) : ''
-      };
-      items.push(item);
-      usedBytes += blob.size;
+      var item = addItem(meta, blob, thumb);
       receivingText = '';
-      var wasEmpty = items.length === 1;
-      renderLayout();
-      appendTile(item);
       renderStatus();
-      if (wasEmpty && !els.home.hidden) focusTile(0);
       toast('Received ' + item.name, 1800);
+      persistItem(item, meta, blob, thumb);
     }
   });
+
+  // Adds an item to the in-memory gallery and grid. Used for new files and for restoring saved ones.
+  function addItem(meta, blob, thumb) {
+    var item = {
+      id: meta.id, name: meta.name || 'Untitled', kind: meta.kind === 'video' ? 'video' : 'photo',
+      mime: meta.mime, size: blob.size, w: meta.w, h: meta.h, duration: meta.duration,
+      addedAt: meta.addedAt || Date.now(), saved: false,
+      url: URL.createObjectURL(blob), thumbUrl: thumb ? URL.createObjectURL(thumb) : ''
+    };
+    items.push(item);
+    usedBytes += blob.size;
+    var wasEmpty = items.length === 1;
+    renderLayout();
+    appendTile(item);
+    if (wasEmpty && !els.home.hidden) focusTile(0);
+    return item;
+  }
+
+  function reasonFor(e) {
+    var n = e && (e.name || '') + ' ' + (e.message || '');
+    return /quota/i.test(n) ? 'Glasses storage is full' : 'Could not save on the glasses';
+  }
+
+  // Saves a received file, then tells the phone whether it was kept. The file stays viewable either way.
+  function persistItem(item, meta, blob, thumb) {
+    var report = function (ok, reason) {
+      item.saved = ok;
+      renderStoreInfo();
+      var m = { t: 'saved', id: item.id, ok: ok, free: freeBytes() };
+      if (!ok) m.reason = reason || 'Not saved';
+      safeSend(conn, m);
+    };
+    if (!persistent) { report(false, 'This glasses browser can’t keep files after the app closes'); return Promise.resolve(); }
+    var rec = {
+      id: item.id, blob: blob, thumb: thumb || null,
+      meta: { id: item.id, name: item.name, kind: item.kind, mime: item.mime, size: item.size,
+              w: item.w, h: item.h, duration: item.duration, addedAt: item.addedAt }
+    };
+    return PGStore.put(rec).then(function () {
+      return refreshStorageFree();
+    }).then(function () { report(true); }, function (e) {
+      console.warn('save failed', e);
+      toast('Not saved: ' + reasonFor(e), 3500);
+      report(false, reasonFor(e));
+    });
+  }
+
+  function restoreSaved() {
+    return PGStore.init().then(function (r) {
+      persistent = r.backend !== 'memory';
+      storeReady = true;
+      renderStoreInfo();
+      if (!persistent) return null;
+      return PGStore.list();
+    }).then(function (recs) {
+      if (!recs || !recs.length) return refreshStorageFree();
+      recs.sort(function (a, b) { return ((a.meta && a.meta.addedAt) || 0) - ((b.meta && b.meta.addedAt) || 0); });
+      var n = 0;
+      recs.forEach(function (r) {
+        try {
+          if (!r || !r.blob || !r.meta || items.some(function (it) { return it.id === r.meta.id; })) return;
+          addItem(r.meta, r.blob, r.thumb).saved = true;
+          n++;
+        } catch (e) { console.warn('skipping unreadable saved item', e); }
+      });
+      renderStatus();
+      if (n) toast('Restored ' + n + (n === 1 ? ' saved item' : ' saved items'), 2500);
+      return refreshStorageFree();
+    }).catch(function (e) {
+      console.warn('restore failed', e);
+      storeReady = true; persistent = false; renderStoreInfo();
+    });
+  }
 
   function appendTile(item) {
     var li = document.createElement('li');
@@ -172,6 +261,7 @@
     usedBytes = 0;
     current = -1;
     els.grid.textContent = '';
+    if (persistent) PGStore.clear().then(refreshStorageFree).then(sendHello, function (e) { console.warn('clear failed', e); toast('Could not clear saved items', 3000); });
     renderLayout();
     renderStatus();
     sendHello();
@@ -218,12 +308,13 @@
   }
 
   function closeViewer() {
+    hideMenu();
     stopSlideshow();
     clearStage();
     els.caption.classList.remove('show');
     els.viewer.hidden = true;
     els.home.hidden = false;
-    if (current >= 0) focusTile(current);
+    if (current >= 0) focusTile(current); else els.btnNew.focus();
   }
 
   function clearStage() {
@@ -236,6 +327,7 @@
     var item = items[current];
     if (!item) return;
     clearStage();
+    hideMenu();
     clearTimeout(slideTimer);
 
     if (item.kind === 'video') {
@@ -286,6 +378,8 @@
     var bits = [(current + 1) + ' / ' + items.length, PG.formatBytes(item.size)];
     if (item.kind === 'video' && item.duration) bits.push(fmtDuration(item.duration));
     if (slideshow) bits.push('slideshow');
+    if (persistent) bits.push(item.saved ? 'saved' : 'not saved');
+    bits.push('↓ options');
     m.textContent = bits.join(' · ');
     els.caption.appendChild(n);
     els.caption.appendChild(m);
@@ -331,13 +425,61 @@
     }
   }
 
+  // ---------- delete menu ----------
+  function menuOpen() { return !els.menu.hidden; }
+  function showMenu() {
+    if (!items[current]) return;
+    stopSlideshow();
+    var v = els.stage.querySelector('video'); if (v && !v.paused) v.pause();
+    els.menu.hidden = false;
+    els.btnKeep.focus();
+  }
+  function hideMenu() {
+    if (els.menu.hidden) return;
+    els.menu.hidden = true;
+    if (!els.viewer.hidden) els.viewer.focus();
+  }
+
+  function deleteCurrent() {
+    var item = items[current];
+    if (!item) return;
+    hideMenu();
+    URL.revokeObjectURL(item.url);
+    if (item.thumbUrl) URL.revokeObjectURL(item.thumbUrl);
+    items.splice(current, 1);
+    usedBytes = Math.max(0, usedBytes - item.size);
+    var li = els.grid.querySelector('.tile[data-id="' + item.id + '"]');
+    if (li && li.parentNode) li.parentNode.remove();
+    if (persistent) PGStore.remove(item.id).then(refreshStorageFree).then(sendHello, function (e) { console.warn('delete failed', e); });
+    else sendHello();
+    renderLayout();
+    toast('Deleted ' + item.name, 2000);
+    if (!items.length) { current = -1; history.back(); return; }   // nothing left: back to the home screen
+    if (current >= items.length) current = items.length - 1;
+    history.replaceState({ screen: 'viewer', i: current }, '');
+    renderCurrent();
+  }
+
+  els.btnKeep.addEventListener('click', hideMenu);
+  els.btnDelete.addEventListener('click', deleteCurrent);
+
   document.addEventListener('keydown', function (e) {
     if (els.viewer.hidden) return;
+    if (menuOpen()) {                       // the two menu buttons take Enter natively; arrows move between them
+      switch (e.key) {
+        case 'ArrowLeft': case 'ArrowRight':
+          e.preventDefault();
+          (document.activeElement === els.btnKeep ? els.btnDelete : els.btnKeep).focus(); break;
+        case 'ArrowUp': case 'ArrowDown': case 'Escape': e.preventDefault(); hideMenu(); break;
+        default: break;
+      }
+      return;
+    }
     switch (e.key) {
       case 'ArrowLeft': e.preventDefault(); go(-1); break;
       case 'ArrowRight': e.preventDefault(); go(1); break;
-      case 'ArrowUp':
-      case 'ArrowDown': e.preventDefault(); toggleCaptionPin(); break;
+      case 'ArrowUp': e.preventDefault(); toggleCaptionPin(); break;
+      case 'ArrowDown': e.preventDefault(); showMenu(); break;
       case 'Enter': e.preventDefault(); primaryAction(); break;
       case 'Escape': e.preventDefault(); history.back(); break; // desktop testing; devices use native Back
       default: break;
@@ -354,7 +496,7 @@
   function safeSend(c, msg) { try { if (c && c.open) c.send(msg); } catch (e) { console.warn('send failed', e); } }
 
   function sendHello() {
-    safeSend(conn, { t: 'hello', v: 1, maxFile: PG.MAX_FILE, free: freeBytes() });
+    safeSend(conn, { t: 'hello', v: 1, maxFile: PG.MAX_FILE, free: freeBytes(), persist: persistent });
   }
 
   function accept(c) {
@@ -445,6 +587,7 @@
     renderStatus();
     els.btnNew.focus();
 
+    restoreSaved();
     window.pgPeerReady.then(startPeer, function (err) {
       console.error(err);
       fatalText = 'Could not load the connection library';

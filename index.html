@@ -26,14 +26,21 @@
       <ul id="grid" class="grid" role="list" hidden></ul>
 
       <footer class="actions">
-        <button type="button" id="btn-newcode">New code</button>
-        <button type="button" id="btn-clear" hidden>Clear all</button>
+        <p id="store-info" class="store-info" role="status" aria-live="polite"></p>
+        <div class="btns">
+          <button type="button" id="btn-newcode">New code</button>
+          <button type="button" id="btn-clear" hidden>Clear all</button>
+        </div>
       </footer>
     </main>
 
     <section id="viewer" class="screen" tabindex="-1" aria-label="Viewer" hidden>
       <div id="stage" class="stage"></div>
       <div id="caption" class="caption" aria-live="polite"></div>
+      <div id="menu" class="menu" role="group" aria-label="Photo actions" hidden>
+        <button type="button" id="btn-menu-keep">Keep</button>
+        <button type="button" id="btn-menu-delete">Delete this</button>
+      </div>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
     </section>
   </div>
@@ -42,6 +49,7 @@
   <script src="js/config.js"></script>
   <script src="js/peer-loader.js"></script>
   <script src="js/shared.js"></script>
+  <script src="js/storage.js"></script>
   <script src="js/glasses.js"></script>
 </body>
 </html>
