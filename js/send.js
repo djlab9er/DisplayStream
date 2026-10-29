@@ -487,6 +487,33 @@
     if (queue.some(function (q) { return q.state === 'sending' || q.state === 'compressing'; })) { e.preventDefault(); e.returnValue = ''; }
   });
 
+  // ---------- files shared from the Android Share sheet (see sw.js) ----------
+  async function takeShared() {
+    var p = new URLSearchParams(location.search).get('share');
+    if (!p) return;
+    try { history.replaceState(null, '', location.pathname); } catch (e) { /* ignore */ }
+    if (p === 'err') { setStatus('Could not receive the shared files. Use Choose photos & videos instead.', 'err'); return; }
+    if (!window.caches) return;
+    try {
+      var cache = await caches.open('pg-share-inbox');
+      var keys = await cache.keys();
+      var files = [];
+      for (var i = 0; i < keys.length; i++) {
+        var r = await cache.match(keys[i]);
+        if (!r) continue;
+        var blob = await r.blob();
+        var name = decodeURIComponent(r.headers.get('X-PG-Name') || 'shared');
+        files.push(new File([blob], name, { type: blob.type, lastModified: Number(r.headers.get('X-PG-Modified')) || Date.now() }));
+      }
+      await caches.delete('pg-share-inbox');
+      if (files.length) addFiles(files);
+    } catch (e) { setStatus('Could not read the shared files.', 'err'); }
+  }
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(function () { /* sharing just won't be offered */ });
+  }
+
   // ---------- init ----------
   (function init() {
     var q = load(QUALITY_KEY);
@@ -500,5 +527,6 @@
       els.code.value = PG.formatCode(saved);
       connect(true);
     }
+    takeShared();
   })();
 })();

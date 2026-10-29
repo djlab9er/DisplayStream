@@ -134,3 +134,12 @@ js/shared.js    protocol + pairing codes        js/peer-loader.js   loads PeerJS
 js/config.js    TURN / own broker settings
 .well-known/meta-wearables-manifest.json  icons/icon.svg   app name and icon on the glasses
 ```
+
+## Share to glasses (Android)
+
+Open `send.html` in Chrome on the phone, then menu → **Install app** / **Add to Home screen**
+("Send to glasses"). After that, **Share** on any photo or video in Gallery, Google Photos, Files
+etc. lists **Send to glasses**. The app opens, reconnects with the last code, and sends the files
+(shrinking videos as usual). Open Phone Gallery on the glasses first. The glasses code is
+remembered; if it changed, type the new one. `sw.js` only handles the share hand-off and caches
+nothing else. Test: `node test/share.js`.
