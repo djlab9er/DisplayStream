@@ -154,11 +154,20 @@ function check(name, fn) {
     const kb = Number(meta.match(/([\d.]+) KB/)[1]);
     assert.ok(Math.abs(kb * 1024 - sizeOf(files.jpg)) < 1024, `${kb} KB vs ${sizeOf(files.jpg)} B`);
   });
-  await check('Enter on a photo toggles slideshow', async () => {
-    await glasses.keyboard.press('Enter');
+  await check('slideshow is started and stopped from the options menu (Down, then Slideshow)', async () => {
+    const pick = async (n) => { await glasses.keyboard.press('ArrowDown'); for (let i = 0; i < n; i++) await glasses.keyboard.press('ArrowRight'); await glasses.keyboard.press('Enter'); };
+    await pick(2);                                   // Keep -> Delete -> Slideshow
     assert.match(await glasses.textContent('#toast'), /Slideshow on/);
-    await glasses.keyboard.press('Enter');
+    await glasses.keyboard.press('ArrowDown');       // menu now offers to stop it
+    assert.match(await glasses.textContent('#btn-menu-slideshow'), /Stop slideshow/);
+    await glasses.keyboard.press('ArrowRight'); await glasses.keyboard.press('ArrowRight'); await glasses.keyboard.press('Enter');
     assert.match(await glasses.textContent('#toast'), /Slideshow off/);
+  });
+  await check('Enter on a photo zooms (and Enter again cycles back to fit)', async () => {
+    await glasses.keyboard.press('Enter');
+    assert.match(await glasses.textContent('#toast'), /Zoom 1/);
+    await glasses.keyboard.press('Enter'); await glasses.keyboard.press('Enter');
+    assert.match(await glasses.textContent('#toast'), /Fit/);
   });
   await check('video: Enter plays, Enter pauses', async () => {
     await glasses.keyboard.press('ArrowRight');
