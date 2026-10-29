@@ -18,6 +18,10 @@
     storeInfo: $('store-info'), menu: $('menu'), btnKeep: $('btn-menu-keep'), btnDelete: $('btn-menu-delete'), btnSlide: $('btn-menu-slideshow')
   };
 
+  var CFG = window.PG_CONFIG || {};
+  var MAX_FILE = CFG.MAX_FILE_MB > 0 ? Math.round(CFG.MAX_FILE_MB * 1048576) : PG.MAX_FILE;
+  var MAX_TOTAL = CFG.MAX_TOTAL_MB > 0 ? Math.round(CFG.MAX_TOTAL_MB * 1048576) : PG.MAX_TOTAL;
+
   var CODE_KEY = 'pgal.code';
   var SLIDE_MS = 5000;
 
@@ -53,7 +57,7 @@
     return m + ':' + String(s % 60).padStart(2, '0');
   }
   function freeBytes() {
-    var f = PG.MAX_TOTAL - usedBytes;
+    var f = MAX_TOTAL - usedBytes;
     if (persistent && storageFree != null) f = Math.min(f, storageFree);
     return Math.max(0, f);
   }
@@ -118,10 +122,10 @@
   // ---------- gallery ----------
   var receiver = new PG.Receiver({
     canAccept: function (meta) {
-      if (meta.size > PG.MAX_FILE) return 'Too large for the glasses (max ' + PG.formatBytes(PG.MAX_FILE) + ')';
+      if (meta.size > MAX_FILE) return 'Too large for the glasses (max ' + PG.formatBytes(MAX_FILE) + ')';
       var pending = 0;
       Object.keys(receiver.active).forEach(function (k) { pending += receiver.active[k].meta.size; });
-      if (usedBytes + pending + meta.size > PG.MAX_TOTAL) return 'Glasses are full. Choose Clear all on the glasses.';
+      if (usedBytes + pending + meta.size > MAX_TOTAL) return 'Glasses are full. Choose Clear all on the glasses.';
       return null;
     },
     onProgress: function (meta, frac) {
@@ -530,7 +534,7 @@
   function safeSend(c, msg) { try { if (c && c.open) c.send(msg); } catch (e) { console.warn('send failed', e); } }
 
   function sendHello() {
-    safeSend(conn, { t: 'hello', v: 1, maxFile: PG.MAX_FILE, free: freeBytes(), persist: persistent });
+    safeSend(conn, { t: 'hello', v: 1, maxFile: MAX_FILE, free: freeBytes(), persist: persistent });
   }
 
   function accept(c) {

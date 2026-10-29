@@ -39,7 +39,17 @@
           <option value="0">Original · biggest files</option>
         </select>
       </div>
-      <p class="note">Videos are sent unchanged. Keep this page open and the screen on while sending.</p>
+      <div class="row field">
+        <label for="vquality">Video size</label>
+        <select id="vquality">
+          <option value="auto">Auto · shrink only if too big · recommended</option>
+          <option value="original">Original · never shrink</option>
+          <option value="720">Always shrink to 720p</option>
+          <option value="480">Always shrink to 480p · smallest</option>
+        </select>
+      </div>
+      <p id="limits" class="note" role="status"></p>
+      <p class="note">Shrinking a video takes about as long as the video itself. Keep this page open and the screen on while it works and while sending.</p>
     </section>
 
     <section id="queue-card" class="card" aria-labelledby="h-queue" hidden>
@@ -55,6 +65,7 @@
   <script src="js/config.js"></script>
   <script src="js/peer-loader.js"></script>
   <script src="js/shared.js"></script>
+  <script src="js/compress.js"></script>
   <script src="js/send.js"></script>
 </body>
 </html>

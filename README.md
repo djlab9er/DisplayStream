@@ -66,8 +66,16 @@ pre-fills it.
   although the code is right, add a TURN relay in `js/config.js` (comments inside explain how).
 - **Photos are shrunk** on the phone to 1200 px JPEG by default (the display is 600 × 600), which keeps
   transfers quick. Choose *Original* on the phone for full size.
-- **Videos are sent unchanged.** The glasses can only play formats their browser supports. MP4 (H.264)
-  and WebM are the safest bet; some iPhone HEVC `.mov` files may not play. The app says so if playback fails.
+- **Video size and limits.** The glasses accept up to **150 MB per file and 300 MB in total** (and no more
+  than the glasses' browser has room for). Change the first two with `MAX_FILE_MB` / `MAX_TOTAL_MB` in
+  `js/config.js`. The phone page shows the current limit and free space. Under **Video size**:
+  *Auto* (default) sends a video as is when it fits and shrinks it only when it doesn't;
+  *Original* never touches it (an oversize video is refused with a hint);
+  *720p* / *480p* always shrink. Shrinking happens on the phone, **in real time**: a 5 minute video takes
+  about 5 minutes and needs the page open with the screen on. It picks a quality that lands under the limit
+  (about 7–15 MB per minute for 480–720p), tries a second pass if the first overshoots, and says up front when a
+  clip is too long to ever fit. Audio is kept. The glasses can only play formats their browser supports;
+  MP4 (H.264) and WebM are the safest. Some iPhone HEVC `.mov` files may not play, and shrinking is a way round that.
 - **Saved photos.** Everything you send is kept on the glasses and comes back the next time you open
   the app (limits: 150 MB per file, 300 MB total, and whatever space the glasses' browser allows).
   The home screen says *Saved on glasses* and the phone page shows *Saved on glasses* or *Not saved*
@@ -107,6 +115,8 @@ node test/protocol.test.js            # transfer protocol, integrity checks, pai
 node test/e2e.js                      # both pages in Chromium (needs Playwright), mock connection
 node test/portrait.js                 # tall photos/videos must fit the 600x600 display
 node test/photozoom.js                # photo zoom and pan (FORCE_FALLBACK=1 tests the fallback path)
+node test/compress.test.js            # video shrink planner (sizes, bitrates, limits)
+node test/video.js                    # shrinking videos in the browser against tiny glasses limits (real time)
 node test/saved.js                    # saved photos: reload, delete menu, Clear all, and every storage fallback
 node test/cast.js                     # Screen Cast receiver and sender
 ```
@@ -116,6 +126,7 @@ node test/cast.js                     # Screen Cast receiver and sender
 ```
 index.html  css/glasses.css  js/glasses.js  js/storage.js   glasses app (storage.js keeps saved photos)
 send.html   css/send.css     js/send.js         phone page
+js/compress.js  shrink videos on the phone to fit the glasses
 js/zoom.js      zoom/pan (gallery photos and Screen Cast)
 js/shared.js    protocol + pairing codes        js/peer-loader.js   loads PeerJS (local, then CDN)
 js/config.js    TURN / own broker settings
