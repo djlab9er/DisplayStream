@@ -46,7 +46,15 @@ class MainActivity : Activity() {
         setContentView(root)
 
         intent?.data?.getQueryParameter("c")?.let { codeInput.setText(it) }
+        if (intent?.getBooleanExtra(CastService.EXTRA_RESUME, false) == true && CastState.paused) beginCast()
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // Tapped "Resume" in the notification: go straight to the screen-capture permission prompt.
+        if (intent?.getBooleanExtra(CastService.EXTRA_RESUME, false) == true && CastState.paused) beginCast()
     }
 
     override fun onResume() {
@@ -59,7 +67,8 @@ class MainActivity : Activity() {
 
     private fun render() {
         status.text = CastState.status
-        start.isEnabled = !CastState.active
+        start.isEnabled = !CastState.active || CastState.paused
+        start.text = if (CastState.paused) "Resume casting" else "Start casting"
         stop.isEnabled = CastState.active
     }
 
@@ -69,9 +78,10 @@ class MainActivity : Activity() {
     }
 
     private fun beginCast() {
-        val code = normalize(codeInput.text.toString())
+        val code = if (CastState.paused) CastState.lastCode else normalize(codeInput.text.toString())
         if (code == null) { CastState.update("Enter the 8-character code from the glasses.", false); return }
         pendingCode = code
+        CastState.lastCode = code
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         @Suppress("DEPRECATION")
         startActivityForResult(mpm.createScreenCaptureIntent(), 100)

@@ -9,11 +9,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.hardware.display.DisplayManager
+import android.net.wifi.WifiManager
 import android.media.projection.MediaProjection
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.util.DisplayMetrics
 import org.webrtc.*
 
@@ -23,8 +25,12 @@ class CastService : Service(), Signaling.Listener {
         const val EXTRA_RESULT = "resultCode"
         const val EXTRA_DATA = "data"
         const val ACTION_STOP = "app.displaystream.cast.STOP"
+        const val EXTRA_RESUME = "resume"
         private const val CHANNEL = "cast"
+        private const val CHANNEL_PAUSE = "cast_pause"
         private const val NOTIF_ID = 1
+        private const val NOTIF_PAUSE_ID = 2
+        private const val PAUSE_LIMIT_MS = 10 * 60 * 1000L
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -42,11 +48,25 @@ class CastService : Service(), Signaling.Listener {
     private val pendingRemote = mutableListOf<IceCandidate>()
     private var timeout: Runnable? = null
     private var stopped = false
+    private var paused = false
+    private var wake: PowerManager.WakeLock? = null
+    private var wifi: WifiManager.WifiLock? = null
+    private var pausedTimeout: Runnable? = null
+    private var capW = 0
+    private var capH = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) { stopCast("Stopped."); return START_NOT_STICKY }
+        if (paused) {                                   // user approved screen capture again: carry on with the same call
+            val again = intent?.getParcelableExtra<Intent>(EXTRA_DATA)
+            if (again != null) {
+                startAsForeground()
+                try { resume(again) } catch (e: Exception) { stopCast("Could not resume: ${e.message}") }
+            }
+            return START_NOT_STICKY
+        }
         val code = intent?.getStringExtra(EXTRA_CODE)
         val data = intent?.getParcelableExtra<Intent>(EXTRA_DATA)
         val result = intent?.getIntExtra(EXTRA_RESULT, 0) ?: 0
@@ -66,6 +86,7 @@ class CastService : Service(), Signaling.Listener {
     private fun startAsForeground() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Casting", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CHANNEL_PAUSE, "Cast paused", NotificationManager.IMPORTANCE_HIGH))
         val stop = PendingIntent.getService(
             this, 0, Intent(this, CastService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -82,6 +103,7 @@ class CastService : Service(), Signaling.Listener {
     }
 
     private fun begin(code: String, resultCode: Int, data: Intent) {
+        acquireLocks()
         dst = "pgcast-$code"
         connectionId = "mc_" + java.util.UUID.randomUUID().toString().replace("-", "").take(16)
 
@@ -102,13 +124,11 @@ class CastService : Service(), Signaling.Listener {
         val w = (dm.widthPixels * scale).toInt() and 1.inv()
         val h = (dm.heightPixels * scale).toInt() and 1.inv()
 
-        capturer = ScreenCapturerAndroid(data, object : MediaProjection.Callback() {
-            override fun onStop() { main.post { stopCast("Screen sharing was stopped.") } }
-        })
+        capW = w
+        capH = h
         helper = SurfaceTextureHelper.create("capture", egl!!.eglBaseContext)
         source = factory!!.createVideoSource(true)
-        capturer!!.initialize(helper, applicationContext, source!!.capturerObserver)
-        capturer!!.startCapture(w, h, 15)
+        startCapturer(data)
         track = factory!!.createVideoTrack("screen", source)
 
         val cfg = PeerConnection.RTCConfiguration(
@@ -157,6 +177,68 @@ class CastService : Service(), Signaling.Listener {
         main.postDelayed(timeout!!, 20_000)
     }
 
+    private fun startCapturer(data: Intent) {
+        capturer = ScreenCapturerAndroid(data, object : MediaProjection.Callback() {
+            // Android 15 QPR1+ stops screen capture whenever the phone locks; it cannot be kept alive.
+            override fun onStop() { main.post { pauseCast() } }
+        })
+        capturer!!.initialize(helper, applicationContext, source!!.capturerObserver)
+        capturer!!.startCapture(capW, capH, 15)
+    }
+
+    /** Capture was stopped by Android (e.g. the phone locked). Keep the call open so the glasses hold the last frame. */
+    private fun pauseCast() {
+        if (stopped || paused) return
+        paused = true
+        try { capturer?.stopCapture() } catch (_: Exception) {}
+        try { capturer?.dispose() } catch (_: Exception) {}
+        capturer = null
+        CastState.update("Paused: Android stops screen sharing when the phone locks. Unlock and tap Resume.", true, true)
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val open = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(EXTRA_RESUME, true)
+        val pi = PendingIntent.getActivity(this, 1, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = Notification.Builder(this, CHANNEL_PAUSE)
+            .setContentTitle("Cast paused")
+            .setContentText("The phone locked. Tap to resume; the glasses keep the last frame.")
+            .setSmallIcon(android.R.drawable.ic_media_pause)
+            .setContentIntent(pi)
+            .addAction(Notification.Action.Builder(null, "Resume", pi).build())
+            .setAutoCancel(true)
+            .build()
+        nm.notify(NOTIF_PAUSE_ID, n)
+        pausedTimeout = Runnable { stopCast("Paused too long, so the cast ended.") }
+        main.postDelayed(pausedTimeout!!, PAUSE_LIMIT_MS)
+    }
+
+    private fun resume(data: Intent) {
+        pausedTimeout?.let { main.removeCallbacks(it) }; pausedTimeout = null
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIF_PAUSE_ID)
+        startCapturer(data)
+        paused = false
+        CastState.update("Casting. Tap Stop to end.", true, false)
+    }
+
+    private fun acquireLocks() {
+        // Keep the CPU and Wi-Fi awake while the screen is off so the connection to the glasses survives.
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "displaystream:cast").apply { acquire(4 * 60 * 60 * 1000L) }
+        } catch (_: Exception) {}
+        try {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val mode = if (Build.VERSION.SDK_INT >= 29) WifiManager.WIFI_MODE_FULL_LOW_LATENCY else @Suppress("DEPRECATION") WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            wifi = wm.createWifiLock(mode, "displaystream:cast").apply { setReferenceCounted(false); acquire() }
+        } catch (_: Exception) {}
+    }
+
+    private fun releaseLocks() {
+        try { if (wake?.isHeld == true) wake?.release() } catch (_: Exception) {}
+        try { if (wifi?.isHeld == true) wifi?.release() } catch (_: Exception) {}
+        wake = null; wifi = null
+    }
+
     private fun newPeerId() = "pgsend-" + java.util.UUID.randomUUID().toString().replace("-", "").take(10)
     private fun clearTimeout() { timeout?.let { main.removeCallbacks(it) }; timeout = null }
 
@@ -200,6 +282,9 @@ class CastService : Service(), Signaling.Listener {
         if (stopped) return
         stopped = true
         clearTimeout()
+        pausedTimeout?.let { main.removeCallbacks(it) }; pausedTimeout = null
+        releaseLocks()
+        try { (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIF_PAUSE_ID) } catch (_: Exception) {}
         try { signaling?.close() } catch (_: Exception) {}
         try { capturer?.stopCapture() } catch (_: Exception) {}
         try { capturer?.dispose() } catch (_: Exception) {}

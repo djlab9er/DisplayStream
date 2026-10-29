@@ -40,6 +40,17 @@ The glasses side already exists in this repo (`cast/`); this spec is the sender.
 - Deep link: `pgcast://cast?c=CODE` (optional; also accept the QR/URL `…/cast/send.html?c=CODE`).
 - Privacy: say clearly that the whole screen incl. notifications is shared; offer "Do Not Disturb" hint.
 
+## Phone locks / screen turns off
+Android 15 QPR1 and newer stop screen projection whenever the device locks (`MediaProjection.Callback.onStop()`,
+log "Stopped MediaProjection due to keyguard lock"); this cannot be prevented by an app. Behavior implemented:
+- Hold a partial wake lock and a Wi-Fi lock while casting, so the connection survives when the display is off.
+- On `onStop()` do NOT hang up. Keep the WebRTC call open (the glasses keep showing the last frame), post a
+  high-importance "Cast paused" notification with a Resume action, and show "Resume casting" in the app.
+- Resume re-asks for screen-capture permission (required every time) and restarts the capturer on the SAME
+  call and video source. End the cast after 10 minutes paused.
+- If the phone has no secure lock (None/Swipe), capture may keep running with the display off; the locks help there.
+- What the glasses can show with the display off is the last frame; a turned-off display has nothing new to capture.
+
 ## Acceptance tests
 1. Open the glasses Screen Cast app, enter the code, accept the system dialog → phone screen appears on the glasses in < 5 s.
 2. Rotate phone / switch apps → stream continues.
