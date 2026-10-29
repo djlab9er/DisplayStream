@@ -9,12 +9,13 @@
   var $ = function (id) { return document.getElementById(id); };
   var els = {
     code: $('code'), btnConnect: $('btn-connect'), status: $('conn-status'),
-    files: $('files'), quality: $('quality'),
+    files: $('files'), quality: $('quality'), vquality: $('vquality'), limits: $('limits'),
     queueCard: $('queue-card'), queue: $('queue'), btnClearDone: $('btn-clear-done')
   };
 
   var CODE_KEY = 'pgal.sender.code';
   var QUALITY_KEY = 'pgal.sender.quality';
+  var VQUALITY_KEY = 'pgal.sender.vquality';
 
   var peer = null, conn = null, connected = false;
   var wantConnected = false, retries = 0, retryTimer = null, connectTimer = null;
@@ -27,6 +28,13 @@
   // ---------- storage ----------
   function store(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } }
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+  function renderLimits() {
+    if (!els.limits) return;
+    els.limits.textContent = connected
+      ? 'Glasses accept files up to ' + PG.formatBytes(maxFile) + ' · ' + PG.formatBytes(free) + ' free'
+      : '';
+  }
 
   // ---------- connection status ----------
   function setStatus(text, kind) {
@@ -85,6 +93,7 @@
       connected = true;
       retries = 0;
       setStatus('Connected to your glasses', 'ok');
+      renderLimits();
       renderAll();
       pump();
     });
@@ -97,6 +106,7 @@
         pendingAcks[id].reject(new Error('Disconnected'));
       });
       setStatus('Disconnected', 'warn');
+      renderLimits();
       renderAll();
       scheduleRetry();
     };
@@ -116,12 +126,15 @@
     if (msg.t === 'hello') {
       if (typeof msg.free === 'number') free = msg.free;
       if (typeof msg.maxFile === 'number') maxFile = msg.maxFile;
+      renderLimits();
     } else if (msg.t === 'ack') {
       if (typeof msg.free === 'number') free = msg.free;
+      renderLimits();
       var p = pendingAcks[msg.id];
       if (p) { delete pendingAcks[msg.id]; p.resolve(msg); }
     } else if (msg.t === 'saved') {
       if (typeof msg.free === 'number') free = msg.free;
+      renderLimits();
       var q = queue.find(function (x) { return x.id === msg.id; });
       if (q) { q.saved = !!msg.ok; q.savedReason = msg.ok ? '' : (msg.reason || ''); updateRow(q); }
     }
@@ -264,6 +277,31 @@
     }
   }
 
+  // Shrinks a video so it fits the glasses (see js/compress.js). Result replaces p.blob; kept for retries.
+  async function maybeShrink(item, p) {
+    if (p.shrunk) return;
+    var limit = Math.min(maxFile, free);
+    var pl = PGCompress.plan(item.vq, p.duration, p.blob.size, limit, Math.min(p.w || 0, p.h || 0));
+    if (pl.fail) throw new Error(pl.fail);
+    if (!pl.compress) return;
+    item.state = 'compressing';
+    item.progress = 0;
+    item.origSize = p.blob.size;
+    updateRow(item);
+    var cancelled = function () { return item.cancelled; };
+    var res = await PGCompress.transcode(p.blob, pl, function (f) { item.progress = f; updateRow(item); }, cancelled);
+    if (res.blob.size > limit) {                      // recorders overshoot: one more pass, aimed lower
+      var again = PGCompress.retryPlan(pl, res.blob.size, limit, p.duration);
+      if (!again) throw new Error('Still too large after shrinking (' + PG.formatBytes(res.blob.size) + '). Send a shorter clip.');
+      item.note = 'second pass'; item.progress = 0; updateRow(item);
+      res = await PGCompress.transcode(p.blob, again, function (f) { item.progress = f; updateRow(item); }, cancelled);
+      if (res.blob.size > limit) throw new Error('Still too large after shrinking (' + PG.formatBytes(res.blob.size) + '). Send a shorter clip.');
+    }
+    p.blob = res.blob; p.mime = res.mime; p.name = swapExt(p.name, res.ext); p.w = res.w; p.h = res.h;
+    p.shrunk = true;
+    item.note = '';
+  }
+
   async function processItem(item) {
     item.state = 'preparing';
     item.note = '';
@@ -273,9 +311,12 @@
         item.prepared = await prepare(item.file, item.quality);
         if (item.prepared.thumb) item.thumbUrl = URL.createObjectURL(item.prepared.thumb);
       }
-      var p = item.prepared, size = p.blob.size;
-      if (size > maxFile) throw new Error('Too large for the glasses (max ' + PG.formatBytes(maxFile) + ')');
-      if (size > free) throw new Error('Glasses are full. Choose Clear all on the glasses.');
+      var p = item.prepared;
+      if (p.kind === 'video') await maybeShrink(item, p);
+      var size = p.blob.size;
+      var hint = p.kind === 'video' ? ' Choose Auto under Video size to shrink it.' : '';
+      if (size > maxFile) throw new Error('Too large for the glasses (max ' + PG.formatBytes(maxFile) + ').' + hint);
+      if (size > free) throw new Error('Not enough room on the glasses (' + PG.formatBytes(free) + ' free).' + (p.kind === 'video' ? hint : ' Choose Clear all on the glasses.'));
 
       item.state = 'sending';
       item.progress = 0;
@@ -302,7 +343,7 @@
       if (!ack.ok) throw new Error(ack.reason || 'The glasses rejected this file');
       item.state = 'done';
     } catch (e) {
-      if (item.cancelled) { removeItem(item.id); return; }
+      if (item.cancelled) { item.state = 'failed'; removeItem(item.id); return; }
       if (!connected) { item.state = 'queued'; item.note = 'Waiting for connection'; }
       else { item.state = 'failed'; item.error = e && e.message ? e.message : 'Failed'; }
     }
@@ -313,7 +354,7 @@
     var q = Number(els.quality.value);
     Array.prototype.forEach.call(fileList, function (file) {
       queue.push({
-        id: PG.newId(), file: file, quality: q, state: 'queued', progress: 0,
+        id: PG.newId(), file: file, quality: q, vq: els.vquality ? els.vquality.value : 'auto', state: 'queued', progress: 0,
         prepared: null, thumbUrl: '', error: '', note: connected ? '' : 'Waiting for connection', cancelled: false
       });
     });
@@ -326,7 +367,7 @@
     var i = queue.findIndex(function (q) { return q.id === id; });
     if (i < 0) return;
     var it = queue[i];
-    if (it.state === 'sending') { it.cancelled = true; return; }
+    if (it.state === 'sending' || it.state === 'compressing') { it.cancelled = true; return; }
     if (it.thumbUrl) URL.revokeObjectURL(it.thumbUrl);
     queue.splice(i, 1);
     renderAll();
@@ -340,8 +381,9 @@
     switch (item.state) {
       case 'queued': return size + ' · ' + (item.note || 'Queued');
       case 'preparing': return size + ' · Preparing…';
+      case 'compressing': return PG.formatBytes(item.file.size) + ' · Shrinking ' + Math.round((item.progress || 0) * 100) + '%' + (item.note ? ' (' + item.note + ')' : '') + ' · about as long as the video';
       case 'sending': return size + ' · Sending ' + Math.round((item.progress || 0) * 100) + '%';
-      case 'done': return size + ' · Sent' + (item.saved === true ? ' · Saved on glasses' : item.saved === false ? ' · Not saved' + (item.savedReason ? ' (' + item.savedReason + ')' : '') : '');
+      case 'done': return size + (item.prepared && item.prepared.shrunk ? ' (was ' + PG.formatBytes(item.origSize) + ')' : '') + ' · Sent' + (item.saved === true ? ' · Saved on glasses' : item.saved === false ? ' · Not saved' + (item.savedReason ? ' (' + item.savedReason + ')' : '') : '');
       case 'failed': return item.error || 'Failed';
       default: return size;
     }
@@ -389,10 +431,14 @@
     var meta = li.querySelector('.meta');
     meta.textContent = metaText(item);
     meta.className = 'meta' + (item.state === 'failed' ? ' err' : item.state === 'done' ? ' ok' : '');
-    li.querySelector('.bar').hidden = item.state !== 'sending';
+    li.querySelector('.bar').hidden = item.state !== 'sending' && item.state !== 'compressing';
     li.querySelector('.bar > i').style.inlineSize = Math.round((item.progress || 0) * 100) + '%';
 
     var acts = li.querySelector('.acts');
+    // Rebuild the buttons only when the state changes: progress updates arrive many times a second and
+    // replacing the button under a finger would swallow taps.
+    if (li.dataset.actsKey === item.state) return;
+    li.dataset.actsKey = item.state;
     acts.textContent = '';
     if (item.state === 'failed') {
       var retry = document.createElement('button');
@@ -403,7 +449,7 @@
     if (item.state !== 'preparing') {
       var rm = document.createElement('button');
       rm.type = 'button';
-      rm.textContent = item.state === 'sending' ? 'Cancel' : 'Remove';
+      rm.textContent = item.state === 'sending' || item.state === 'compressing' ? 'Cancel' : 'Remove';
       rm.addEventListener('click', function () { removeItem(item.id); });
       acts.appendChild(rm);
     }
@@ -430,6 +476,7 @@
     els.files.value = '';
   });
   els.quality.addEventListener('change', function () { store(QUALITY_KEY, els.quality.value); });
+  els.vquality.addEventListener('change', function () { store(VQUALITY_KEY, els.vquality.value); });
   els.btnClearDone.addEventListener('click', function () {
     queue.filter(function (q) { return q.state === 'done'; }).forEach(function (q) { removeItem(q.id); });
   });
@@ -437,13 +484,15 @@
     if (document.visibilityState === 'visible' && pumping) acquireWakeLock();
   });
   window.addEventListener('beforeunload', function (e) {
-    if (queue.some(function (q) { return q.state === 'sending'; })) { e.preventDefault(); e.returnValue = ''; }
+    if (queue.some(function (q) { return q.state === 'sending' || q.state === 'compressing'; })) { e.preventDefault(); e.returnValue = ''; }
   });
 
   // ---------- init ----------
   (function init() {
     var q = load(QUALITY_KEY);
     if (q && els.quality.querySelector('option[value="' + q + '"]')) els.quality.value = q;
+    var vq = load(VQUALITY_KEY);
+    if (vq && els.vquality.querySelector('option[value="' + vq + '"]')) els.vquality.value = vq;
 
     var fromUrl = new URLSearchParams(location.search).get('c');
     var saved = PG.normalizeCode(fromUrl) || PG.normalizeCode(load(CODE_KEY));

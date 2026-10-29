@@ -8,6 +8,11 @@
  * To use your own PeerJS server instead of the public one, fill in PEER_SERVER.
  */
 window.PG_CONFIG = {
+  // How much the glasses accept. Defaults: 150 MB per file, 300 MB in total. Raise them if your
+  // glasses cope; lower them if the app ever runs out of memory. (Fractions are fine.)
+  // MAX_FILE_MB: 150,
+  // MAX_TOTAL_MB: 300,
+
   ICE_SERVERS: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' }
