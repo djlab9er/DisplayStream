@@ -15,12 +15,18 @@
     home: $('home'), viewer: $('viewer'), stage: $('stage'), caption: $('caption'), toast: $('toast'),
     dot: $('dot'), status: $('status'), codeMini: $('code-mini'), pair: $('pair'), code: $('code'),
     sendUrl: $('send-url'), grid: $('grid'), btnNew: $('btn-newcode'), btnClear: $('btn-clear'),
-    storeInfo: $('store-info'), menu: $('menu'), btnKeep: $('btn-menu-keep'), btnDelete: $('btn-menu-delete'), btnSlide: $('btn-menu-slideshow')
+    storeInfo: $('store-info'), menu: $('menu'), btnKeep: $('btn-menu-keep'), btnDelete: $('btn-menu-delete'), btnSlide: $('btn-menu-slideshow'),
+    btnSpeed: $('btn-menu-speed'), btnSound: $('btn-menu-sound'), btnPrev: $('btn-menu-prev'), btnNext: $('btn-menu-next'),
+    transport: $('transport'), tfill: $('tfill'), ttime: $('ttime'), tflags: $('tflags')
   };
 
   var CFG = window.PG_CONFIG || {};
   var MAX_FILE = CFG.MAX_FILE_MB > 0 ? Math.round(CFG.MAX_FILE_MB * 1048576) : PG.MAX_FILE;
   var MAX_TOTAL = CFG.MAX_TOTAL_MB > 0 ? Math.round(CFG.MAX_TOTAL_MB * 1048576) : PG.MAX_TOTAL;
+
+  var SEEK_S = CFG.SEEK_SECONDS > 0 ? CFG.SEEK_SECONDS : 10;
+  var RATES = [0.5, 1, 1.5, 2];
+  var playRate = 1, soundMuted = false;      // kept for the session, applied to every video
 
   var CODE_KEY = 'pgal.code';
   var SLIDE_MS = 5000;
@@ -56,6 +62,7 @@
     var s = Math.round(sec), m = Math.floor(s / 60);
     return m + ':' + String(s % 60).padStart(2, '0');
   }
+  function clock(sec) { var s = Math.max(0, Math.round(sec || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
   function freeBytes() {
     var f = MAX_TOTAL - usedBytes;
     if (persistent && storageFree != null) f = Math.min(f, storageFree);
@@ -316,7 +323,7 @@
     hideMenu();
     stopSlideshow();
     clearStage();
-    els.caption.classList.remove('show');
+    hideOverlays();
     els.viewer.hidden = true;
     els.home.hidden = false;
     if (current >= 0) focusTile(current); else els.btnNew.focus();
@@ -342,16 +349,22 @@
       v.playsInline = true;
       v.preload = 'auto';
       v.controls = false;
+      v.playbackRate = playRate;
+      v.muted = soundMuted;
       if (item.thumbUrl) v.poster = item.thumbUrl;
       var glyph = document.createElement('div');
       glyph.className = 'glyph';
       var gs = document.createElement('span');
       gs.textContent = '▶';
       glyph.appendChild(gs);
-      v.addEventListener('play', function () { glyph.hidden = true; clearTimeout(slideTimer); });
-      v.addEventListener('pause', function () { glyph.hidden = false; gs.textContent = '▶'; });
+      v.addEventListener('play', function () { glyph.hidden = true; clearTimeout(slideTimer); showCaption(); });
+      v.addEventListener('pause', function () { if (v.ended) return; glyph.hidden = false; gs.textContent = '▶'; showCaption(); });
+      v.addEventListener('timeupdate', renderTransport);
+      v.addEventListener('durationchange', renderTransport);
+      v.addEventListener('loadedmetadata', function () { fixUnknownDuration(v); renderTransport(); });
+      v.addEventListener('ratechange', renderTransport);
       v.addEventListener('ended', function () {
-        glyph.hidden = false; gs.textContent = '↻';
+        glyph.hidden = false; gs.textContent = '↻'; renderTransport(); showCaption();
         if (slideshow) go(1);
       });
       v.addEventListener('error', function () {
@@ -392,14 +405,51 @@
     els.caption.appendChild(n);
     els.caption.appendChild(m);
     els.caption.classList.add('show');
+    if (item.kind === 'video') { renderTransport(); els.transport.classList.add('show'); }
+    else els.transport.classList.remove('show');
     clearTimeout(captionTimer);
-    if (!captionPinned) captionTimer = setTimeout(function () { els.caption.classList.remove('show'); }, 3000);
+    if (!captionPinned) captionTimer = setTimeout(hideOverlays, 3000);
+  }
+
+  function hideOverlays() { els.caption.classList.remove('show'); els.transport.classList.remove('show'); }
+
+  // MediaRecorder-made WebM files report an infinite duration, which breaks the progress bar and seeking.
+  // Seeking far past the end makes the browser compute the real length; then go back to the start.
+  function fixUnknownDuration(v) {
+    if (isFinite(v.duration)) return;
+    var undo = function () { v.removeEventListener('timeupdate', undo); v.currentTime = 0; renderTransport(); };
+    v.addEventListener('timeupdate', undo);
+    try { v.currentTime = 1e101; } catch (e) { v.removeEventListener('timeupdate', undo); }
+  }
+
+  function videoEl() { return els.stage.querySelector('video'); }
+
+  function renderTransport() {
+    var v = videoEl(), item = items[current];
+    if (!v || !item || item.kind !== 'video') return;
+    var dur = isFinite(v.duration) && v.duration > 0 ? v.duration : (item.duration || 0);
+    var t = Math.min(v.currentTime || 0, dur || v.currentTime || 0);
+    els.tfill.style.inlineSize = (dur ? Math.round(t / dur * 1000) / 10 : 0) + '%';
+    els.ttime.textContent = clock(t) + ' / ' + (dur ? clock(dur) : '–:––');
+    var flags = [];
+    if (v.playbackRate !== 1) flags.push(v.playbackRate + '×');
+    if (v.muted) flags.push('muted');
+    els.tflags.textContent = flags.join(' · ');
+  }
+
+  function seek(deltaSec) {
+    var v = videoEl();
+    if (!v) return;
+    var dur = isFinite(v.duration) && v.duration > 0 ? v.duration : (items[current] && items[current].duration) || Infinity;
+    try { v.currentTime = Math.max(0, Math.min(dur, (v.currentTime || 0) + deltaSec)); } catch (e) { return; }
+    renderTransport();
+    showCaption();
   }
 
   function toggleCaptionPin() {
     captionPinned = !captionPinned;
     if (captionPinned) { showCaption(); clearTimeout(captionTimer); }
-    else els.caption.classList.remove('show');
+    else hideOverlays();
   }
 
   function go(delta) {
@@ -452,11 +502,34 @@
   function showMenu() {
     if (!items[current]) return;
     clearTimeout(slideTimer);                     // paused while the menu is open
-    var v = els.stage.querySelector('video'); if (v && !v.paused) v.pause();
+    hideOverlays();                               // the menu sits where the caption and progress bar are
+    var isVideo = items[current].kind === 'video';
+    [els.btnSpeed, els.btnSound, els.btnPrev, els.btnNext].forEach(function (b) { b.hidden = !isVideo || (items.length < 2 && (b === els.btnPrev || b === els.btnNext)); });
+    renderMenuLabels();
     els.btnSlide.textContent = slideshow ? 'Stop slideshow' : 'Slideshow';
     els.menu.hidden = false;
     els.btnKeep.focus();
   }
+  function renderMenuLabels() {
+    els.btnSpeed.textContent = 'Speed ' + playRate + '×';
+    els.btnSound.textContent = soundMuted ? 'Sound off' : 'Sound on';
+  }
+  function menuButtons() {
+    return [els.btnKeep, els.btnDelete, els.btnSpeed, els.btnSound, els.btnPrev, els.btnNext, els.btnSlide].filter(function (b) { return !b.hidden; });
+  }
+  els.btnSpeed.addEventListener('click', function () {
+    playRate = RATES[(RATES.indexOf(playRate) + 1) % RATES.length];
+    var v = videoEl(); if (v) v.playbackRate = playRate;
+    renderMenuLabels(); renderTransport();
+  });
+  els.btnSound.addEventListener('click', function () {
+    soundMuted = !soundMuted;
+    var v = videoEl(); if (v) v.muted = soundMuted;
+    renderMenuLabels(); renderTransport();
+  });
+  els.btnPrev.addEventListener('click', function () { hideMenu(); go(-1); });
+  els.btnNext.addEventListener('click', function () { hideMenu(); go(1); });
+
   function hideMenu() {
     if (els.menu.hidden) return;
     els.menu.hidden = true;
@@ -493,7 +566,7 @@
       switch (e.key) {
         case 'ArrowLeft': case 'ArrowRight':
           e.preventDefault();
-          var order = [els.btnKeep, els.btnDelete, els.btnSlide];
+          var order = menuButtons();
           var at = Math.max(0, order.indexOf(document.activeElement));
           order[(at + (e.key === 'ArrowRight' ? 1 : order.length - 1)) % order.length].focus(); break;
         case 'ArrowUp': case 'ArrowDown': case 'Escape': e.preventDefault(); hideMenu(); break;
@@ -513,9 +586,10 @@
       }
       return;
     }
+    var onVideo = items[current] && items[current].kind === 'video';
     switch (e.key) {
-      case 'ArrowLeft': e.preventDefault(); go(-1); break;
-      case 'ArrowRight': e.preventDefault(); go(1); break;
+      case 'ArrowLeft': e.preventDefault(); if (onVideo) seek(-SEEK_S); else go(-1); break;
+      case 'ArrowRight': e.preventDefault(); if (onVideo) seek(SEEK_S); else go(1); break;
       case 'ArrowUp': e.preventDefault(); toggleCaptionPin(); break;
       case 'ArrowDown': e.preventDefault(); showMenu(); break;
       case 'Enter': e.preventDefault(); primaryAction(); break;

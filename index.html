@@ -36,10 +36,18 @@
 
     <section id="viewer" class="screen" tabindex="-1" aria-label="Viewer" hidden>
       <div id="stage" class="stage"></div>
+      <div id="transport" class="transport" aria-hidden="true">
+        <div class="track"><i id="tfill"></i></div>
+        <div class="tinfo"><span id="ttime">0:00 / 0:00</span><span id="tflags"></span></div>
+      </div>
       <div id="caption" class="caption" aria-live="polite"></div>
       <div id="menu" class="menu" role="group" aria-label="Photo actions" hidden>
         <button type="button" id="btn-menu-keep">Keep</button>
         <button type="button" id="btn-menu-delete">Delete this</button>
+        <button type="button" id="btn-menu-speed" hidden>Speed 1×</button>
+        <button type="button" id="btn-menu-sound" hidden>Sound on</button>
+        <button type="button" id="btn-menu-prev" hidden>Previous</button>
+        <button type="button" id="btn-menu-next" hidden>Next</button>
         <button type="button" id="btn-menu-slideshow">Slideshow</button>
       </div>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
