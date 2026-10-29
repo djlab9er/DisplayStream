@@ -177,14 +177,14 @@ class CastService : Service(), Signaling.Listener {
             override fun onRenegotiationNeeded() {}
             override fun onAddTrack(r: RtpReceiver?, s: Array<out MediaStream>?) {}
         })
-        conn.addTrack(track, listOf("stream"))
+        conn!!.addTrack(track, listOf("stream"))
         // Cap bitrate for a small display / mobile networks.
         conn.senders.firstOrNull()?.let { s ->
             val p = s.parameters
             p.encodings.forEach { it.maxBitrateBps = 1_500_000; it.maxFramerate = 15 }
             s.parameters = p
         }
-        return conn
+        return conn!!
     }
 
     private fun openSignaling() {
