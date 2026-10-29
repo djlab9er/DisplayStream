@@ -15,6 +15,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 class MainActivity : Activity() {
+    companion object { const val EXTRA_AUTOSTART = "autostart" }
     private val alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
     private lateinit var codeInput: EditText
     private lateinit var status: TextView
@@ -28,7 +29,7 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, pad, pad, pad) }
         root.addView(TextView(this).apply { text = "Cast your screen to the glasses"; textSize = 22f })
         root.addView(TextView(this).apply {
-            text = "Open Screen Cast on the glasses, then type the code it shows. Your whole screen, including notifications, will be visible on the glasses."
+            text = "Open Screen Cast on the glasses and type the code it shows, once. The app remembers it, so after that you can start casting from the Quick Settings tile (swipe down, pencil/edit, add \"Cast to glasses\"). Your whole screen, including notifications, will be visible on the glasses."
             setPadding(0, pad / 2, 0, pad / 2)
         })
         codeInput = EditText(this).apply {
@@ -45,7 +46,9 @@ class MainActivity : Activity() {
         root.addView(start); root.addView(stop); root.addView(status)
         setContentView(root)
 
+        getSharedPreferences("pgcast", MODE_PRIVATE).getString("code", null)?.let { codeInput.setText(it.take(4) + "-" + it.drop(4)) }
         intent?.data?.getQueryParameter("c")?.let { codeInput.setText(it) }
+        if (intent?.getBooleanExtra(EXTRA_AUTOSTART, false) == true && !CastState.active) beginCast()
         if (intent?.getBooleanExtra(CastService.EXTRA_RESUME, false) == true && CastState.paused) beginCast()
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
     }
@@ -55,6 +58,7 @@ class MainActivity : Activity() {
         setIntent(intent)
         // Tapped "Resume" in the notification: go straight to the screen-capture permission prompt.
         if (intent?.getBooleanExtra(CastService.EXTRA_RESUME, false) == true && CastState.paused) beginCast()
+        if (intent?.getBooleanExtra(EXTRA_AUTOSTART, false) == true && !CastState.active) beginCast()
     }
 
     override fun onResume() {
@@ -82,6 +86,7 @@ class MainActivity : Activity() {
         if (code == null) { CastState.update("Enter the 8-character code from the glasses.", false); return }
         pendingCode = code
         CastState.lastCode = code
+        getSharedPreferences("pgcast", MODE_PRIVATE).edit().putString("code", code).apply()
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         @Suppress("DEPRECATION")
         startActivityForResult(mpm.createScreenCaptureIntent(), 100)

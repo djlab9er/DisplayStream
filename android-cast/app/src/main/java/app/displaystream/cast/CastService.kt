@@ -31,6 +31,7 @@ class CastService : Service(), Signaling.Listener {
         private const val NOTIF_ID = 1
         private const val NOTIF_PAUSE_ID = 2
         private const val PAUSE_LIMIT_MS = 10 * 60 * 1000L
+        private const val MAX_ATTEMPTS = 8
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -54,6 +55,10 @@ class CastService : Service(), Signaling.Listener {
     private var pausedTimeout: Runnable? = null
     private var capW = 0
     private var capH = 0
+    private var attempts = 0
+    private var gen = 0
+    private var mediaUp = false
+    private var retry: Runnable? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -131,6 +136,13 @@ class CastService : Service(), Signaling.Listener {
         startCapturer(data)
         track = factory!!.createVideoTrack("screen", source)
 
+        pc = makePc()
+        openSignaling()
+    }
+
+    private fun makePc(): PeerConnection {
+        val myGen = ++gen
+        mediaUp = false
         val cfg = PeerConnection.RTCConfiguration(
             listOf(
                 PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
@@ -138,17 +150,18 @@ class CastService : Service(), Signaling.Listener {
             ),
         ).apply { sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN }
 
-        pc = factory!!.createPeerConnection(cfg, object : PeerConnection.Observer {
+        val conn = factory!!.createPeerConnection(cfg, object : PeerConnection.Observer {
             override fun onIceCandidate(c: IceCandidate) {
                 signaling?.sendCandidate(dst, connectionId, c.sdpMid, c.sdpMLineIndex, c.sdp)
             }
             override fun onIceConnectionChange(s: PeerConnection.IceConnectionState) {
                 main.post {
+                    if (myGen != gen) return@post          // a replaced connection: ignore its events
                     when (s) {
                         PeerConnection.IceConnectionState.CONNECTED,
-                        PeerConnection.IceConnectionState.COMPLETED -> { clearTimeout(); CastState.update("Casting. Tap Stop to end.", true) }
+                        PeerConnection.IceConnectionState.COMPLETED -> { clearTimeout(); mediaUp = true; attempts = 0; CastState.update("Casting. Tap Stop to end.", true) }
                         PeerConnection.IceConnectionState.FAILED,
-                        PeerConnection.IceConnectionState.CLOSED -> stopCast("Connection lost.")
+                        PeerConnection.IceConnectionState.CLOSED -> reconnect("Connection lost.")
                         PeerConnection.IceConnectionState.DISCONNECTED -> CastState.update("Reconnecting…", true)
                         else -> {}
                     }
@@ -164,17 +177,40 @@ class CastService : Service(), Signaling.Listener {
             override fun onRenegotiationNeeded() {}
             override fun onAddTrack(r: RtpReceiver?, s: Array<out MediaStream>?) {}
         })
-        pc!!.addTrack(track, listOf("stream"))
+        conn!!.addTrack(track, listOf("stream"))
         // Cap bitrate for a small display / mobile networks.
-        pc!!.senders.firstOrNull()?.let { s ->
+        conn.senders.firstOrNull()?.let { s ->
             val p = s.parameters
             p.encodings.forEach { it.maxBitrateBps = 1_500_000; it.maxFramerate = 15 }
             s.parameters = p
         }
+        return conn!!
+    }
 
+    private fun openSignaling() {
         signaling = Signaling(newPeerId(), this).also { it.connect() }
-        timeout = Runnable { stopCast("No answer. Check the code, and that the glasses are not already casting.") }
+        timeout = Runnable { reconnect("No answer. Are the glasses open on Screen Cast?") }
         main.postDelayed(timeout!!, 20_000)
+    }
+
+    /** Called when the link drops. Keeps the capture running and redials the glasses with the same code. */
+    private fun reconnect(why: String) {
+        if (stopped || paused || retry != null) return   // already waiting to redial
+        clearTimeout()
+        if (++attempts > MAX_ATTEMPTS) { stopCast("$why Gave up after $MAX_ATTEMPTS tries."); return }
+        CastState.update("Reconnecting… (try $attempts of $MAX_ATTEMPTS)", true)
+        try { signaling?.close() } catch (_: Exception) {}
+        try { pc?.close() } catch (_: Exception) {}
+        remoteSet = false
+        pendingRemote.clear()
+        connectionId = "mc_" + java.util.UUID.randomUUID().toString().replace("-", "").take(16)
+        val delay = minOf(2000L * attempts, 10_000L)
+        retry = Runnable {
+            retry = null
+            if (stopped || paused) return@Runnable
+            try { pc = makePc(); openSignaling() } catch (e: Exception) { stopCast("Could not reconnect: ${e.message}") }
+        }
+        main.postDelayed(retry!!, delay)
     }
 
     private fun startCapturer(data: Intent) {
@@ -275,13 +311,15 @@ class CastService : Service(), Signaling.Listener {
         main.post { if (remoteSet) pc?.addIceCandidate(c) else pendingRemote.add(c) }
     }
 
-    override fun onError(message: String) { main.post { stopCast("Error: $message") } }
-    override fun onClosed() { main.post { if (!stopped) stopCast("Disconnected from the broker.") } }
+    // Once the media link is up the broker is no longer needed, so its failures only matter before that.
+    override fun onError(message: String) { main.post { if (!mediaUp) reconnect("Error: $message") } }
+    override fun onClosed() { main.post { if (!mediaUp && !stopped && !paused) reconnect("Disconnected from the broker.") } }
 
     private fun stopCast(message: String) {
         if (stopped) return
         stopped = true
         clearTimeout()
+        retry?.let { main.removeCallbacks(it) }; retry = null
         pausedTimeout?.let { main.removeCallbacks(it) }; pausedTimeout = null
         releaseLocks()
         try { (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIF_PAUSE_ID) } catch (_: Exception) {}

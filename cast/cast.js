@@ -31,7 +31,13 @@
   }
 
   function onCall(call) {
-    if (current) { try { call.close(); } catch (e) {} return; }   // busy
+    if (current) {
+      // Busy only while the current cast is really alive. A sender that dropped and is reconnecting
+      // (same code) replaces its own dead call instead of being turned away.
+      var st = current.peerConnection && current.peerConnection.iceConnectionState;
+      if (st === 'connected' || st === 'completed') { try { call.close(); } catch (e) {} return; }
+      var old = current; current = null; try { old.close(); } catch (e) {}
+    }
     current = call;
     status('Connecting…');
     call.on('stream', function (stream) {
@@ -45,19 +51,32 @@
     call.answer();   // receive-only
   }
 
-  function start() {
+  // The code is kept between sessions so the phone only has to be told once.
+  var CODE_KEY = 'pgcast.code', claimTries = 0;
+  function loadCode() { try { return PG.normalizeCode(localStorage.getItem(CODE_KEY)); } catch (e) { return null; } }
+  function saveCode(c) { try { localStorage.setItem(CODE_KEY, c); } catch (e) {} }
+
+  function start(fresh) {
     destroyed = false;
-    code = PG.newCode();
+    code = (!fresh && loadCode()) || PG.newCode();
+    saveCode(code);
     $('code').textContent = PG.formatCode(code);
     $('send-url').textContent = location.origin.replace(/^https?:\/\//, '') + location.pathname.replace(/[^/]*$/, '') + 'send.html';
     status('Connecting to broker…');
     window.pgPeerReady.then(function () {
       peer = window.pgMakePeer(PG.castPeerId(code));
-      peer.on('open', function () { status('Waiting for a sender…'); });
+      peer.on('open', function () { claimTries = 0; status('Waiting for a sender…'); });
       peer.on('call', onCall);
       peer.on('disconnected', function () { if (!destroyed) { status('Reconnecting…'); try { peer.reconnect(); } catch (e) {} } });
       peer.on('error', function (e) {
-        if (e && e.type === 'unavailable-id') { stop(); start(); return; }
+        if (e && e.type === 'unavailable-id') {
+          // The broker may still hold our id from a moment ago: retry the SAME code a few times
+          // before giving up and choosing a new one.
+          stop();
+          if (claimTries++ < 6) { status('Reclaiming your code…'); setTimeout(function () { start(); }, 3000); }
+          else { claimTries = 0; start(true); }
+          return;
+        }
         status('Error: ' + ((e && e.type) || 'unknown'));
       });
     }, function () { status('Could not load PeerJS (offline?)'); });
@@ -69,7 +88,7 @@
     if (peer) { try { peer.destroy(); } catch (e) {} peer = null; }
   }
 
-  $('btn-newcode').addEventListener('click', function () { stop(); endCall('Starting…'); start(); });
+  $('btn-newcode').addEventListener('click', function () { stop(); endCall('Starting…'); claimTries = 0; start(true); });
 
   document.addEventListener('keydown', function (e) {
     if ($('screen').hidden) return;
