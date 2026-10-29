@@ -15,7 +15,7 @@
     home: $('home'), viewer: $('viewer'), stage: $('stage'), caption: $('caption'), toast: $('toast'),
     dot: $('dot'), status: $('status'), codeMini: $('code-mini'), pair: $('pair'), code: $('code'),
     sendUrl: $('send-url'), grid: $('grid'), btnNew: $('btn-newcode'), btnClear: $('btn-clear'),
-    storeInfo: $('store-info'), menu: $('menu'), btnKeep: $('btn-menu-keep'), btnDelete: $('btn-menu-delete')
+    storeInfo: $('store-info'), menu: $('menu'), btnKeep: $('btn-menu-keep'), btnDelete: $('btn-menu-delete'), btnSlide: $('btn-menu-slideshow')
   };
 
   var CODE_KEY = 'pgal.code';
@@ -38,6 +38,7 @@
   var fatalText = '';
 
   var slideshow = false, slideTimer = null;
+  var zoom = null;             // PGZoom for the photo on screen (null for videos / nothing shown)
   var captionTimer = null, captionPinned = false, toastTimer = null;
   var clearArmed = false, clearTimer = null;
 
@@ -321,6 +322,7 @@
     var v = els.stage.querySelector('video');
     if (v) { try { v.pause(); } catch (e) { /* ignore */ } v.removeAttribute('src'); v.load(); }
     els.stage.textContent = '';
+    zoom = null;
   }
 
   function renderCurrent() {
@@ -359,6 +361,7 @@
       img.alt = item.name;
       img.decoding = 'async';
       img.src = item.url;
+      zoom = PGZoom.create(img, function () { return { w: img.naturalWidth, h: img.naturalHeight }; });
       els.stage.appendChild(img);
     }
 
@@ -379,6 +382,7 @@
     if (item.kind === 'video' && item.duration) bits.push(fmtDuration(item.duration));
     if (slideshow) bits.push('slideshow');
     if (persistent) bits.push(item.saved ? 'saved' : 'not saved');
+    if (item.kind === 'photo') bits.push('Enter = zoom');
     bits.push('↓ options');
     m.textContent = bits.join(' · ');
     els.caption.appendChild(n);
@@ -417,27 +421,42 @@
       if (v.paused) { var p = v.play(); if (p && p.catch) p.catch(function () { toast('Could not play this video', 3000); }); }
       else v.pause();
     } else {
-      if (items.length < 2) { toast('Add more photos for a slideshow'); return; }
-      slideshow = !slideshow;
-      toast(slideshow ? 'Slideshow on' : 'Slideshow off');
-      scheduleSlide();
-      showCaption();
+      cycleZoom();
     }
+  }
+
+  function cycleZoom() {
+    if (!zoom) return;
+    var img = els.stage.querySelector('img');
+    if (!img || !img.naturalWidth) return;       // not decoded yet
+    stopSlideshow();                              // don't jump to the next photo while zoomed
+    toast(zoom.cycle(), 1800);
+    showCaption();
+  }
+
+  function toggleSlideshow() {
+    if (items.length < 2) { toast('Add more photos for a slideshow'); return; }
+    slideshow = !slideshow;
+    toast(slideshow ? 'Slideshow on' : 'Slideshow off');
+    if (zoom) zoom.reset();
+    scheduleSlide();
+    showCaption();
   }
 
   // ---------- delete menu ----------
   function menuOpen() { return !els.menu.hidden; }
   function showMenu() {
     if (!items[current]) return;
-    stopSlideshow();
+    clearTimeout(slideTimer);                     // paused while the menu is open
     var v = els.stage.querySelector('video'); if (v && !v.paused) v.pause();
+    els.btnSlide.textContent = slideshow ? 'Stop slideshow' : 'Slideshow';
     els.menu.hidden = false;
     els.btnKeep.focus();
   }
   function hideMenu() {
     if (els.menu.hidden) return;
     els.menu.hidden = true;
-    if (!els.viewer.hidden) els.viewer.focus();
+    if (!els.viewer.hidden) { els.viewer.focus(); scheduleSlide(); }
   }
 
   function deleteCurrent() {
@@ -462,6 +481,7 @@
 
   els.btnKeep.addEventListener('click', hideMenu);
   els.btnDelete.addEventListener('click', deleteCurrent);
+  els.btnSlide.addEventListener('click', function () { hideMenu(); toggleSlideshow(); });
 
   document.addEventListener('keydown', function (e) {
     if (els.viewer.hidden) return;
@@ -469,8 +489,22 @@
       switch (e.key) {
         case 'ArrowLeft': case 'ArrowRight':
           e.preventDefault();
-          (document.activeElement === els.btnKeep ? els.btnDelete : els.btnKeep).focus(); break;
+          var order = [els.btnKeep, els.btnDelete, els.btnSlide];
+          var at = Math.max(0, order.indexOf(document.activeElement));
+          order[(at + (e.key === 'ArrowRight' ? 1 : order.length - 1)) % order.length].focus(); break;
         case 'ArrowUp': case 'ArrowDown': case 'Escape': e.preventDefault(); hideMenu(); break;
+        default: break;
+      }
+      return;
+    }
+    if (zoom && zoom.zoomed) {               // zoomed in: arrows pan, Enter cycles the zoom, Back leaves
+      switch (e.key) {
+        case 'ArrowLeft': e.preventDefault(); zoom.pan(-1, 0); break;
+        case 'ArrowRight': e.preventDefault(); zoom.pan(1, 0); break;
+        case 'ArrowUp': e.preventDefault(); zoom.pan(0, -1); break;
+        case 'ArrowDown': e.preventDefault(); zoom.pan(0, 1); break;
+        case 'Enter': e.preventDefault(); cycleZoom(); break;
+        case 'Escape': e.preventDefault(); history.back(); break;
         default: break;
       }
       return;

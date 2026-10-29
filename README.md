@@ -50,9 +50,10 @@ pre-fills it.
 |---|---|---|
 | Grid | arrows / Enter | move between thumbnails / open |
 | Viewer | ◀ ▶ | previous / next (wraps around) |
-| Viewer | Enter | play/pause a video; on photos, start/stop a 5 s slideshow |
+| Viewer | Enter | video: play/pause. Photo: **zoom** — Fit → Zoom 1 (fills the square) → Zoom 2 → Fit |
+| Viewer, zoomed | ◀ ▶ ▲ ▼ | pan around the photo (to change photo, zoom back out to Fit first) |
 | Viewer | ▲ | pin or hide the filename caption |
-| Viewer | ▼ | open the options menu: **Keep** (default) or **Delete this** (◀ ▶ to choose, Enter to confirm, ▲ ▼ to close) |
+| Viewer | ▼ | open the options menu: **Keep** (default) **Delete this** or **Slideshow** (5 s per photo; ◀ ▶ to choose, Enter to confirm, ▲ ▼ to close) |
 | Anywhere | Back | viewer → grid; grid → exits the app |
 
 **Clear all** (press twice) deletes everything on the glasses, including saved copies. **New code** replaces the pairing code.
@@ -105,6 +106,7 @@ A second glasses web app, **Screen Cast**, shows a live screen shared from anoth
 node test/protocol.test.js            # transfer protocol, integrity checks, pairing codes
 node test/e2e.js                      # both pages in Chromium (needs Playwright), mock connection
 node test/portrait.js                 # tall photos/videos must fit the 600x600 display
+node test/photozoom.js                # photo zoom and pan (FORCE_FALLBACK=1 tests the fallback path)
 node test/saved.js                    # saved photos: reload, delete menu, Clear all, and every storage fallback
 node test/cast.js                     # Screen Cast receiver and sender
 ```
@@ -114,6 +116,7 @@ node test/cast.js                     # Screen Cast receiver and sender
 ```
 index.html  css/glasses.css  js/glasses.js  js/storage.js   glasses app (storage.js keeps saved photos)
 send.html   css/send.css     js/send.js         phone page
+js/zoom.js      zoom/pan (gallery photos and Screen Cast)
 js/shared.js    protocol + pairing codes        js/peer-loader.js   loads PeerJS (local, then CDN)
 js/config.js    TURN / own broker settings
 .well-known/meta-wearables-manifest.json  icons/icon.svg   app name and icon on the glasses
