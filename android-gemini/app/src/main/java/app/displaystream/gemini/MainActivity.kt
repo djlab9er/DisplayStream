@@ -5,7 +5,6 @@ import android.content.Context
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
-import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -30,9 +29,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val prefs = getSharedPreferences("gg", Context.MODE_PRIVATE)
-        btLauncher.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.RECORD_AUDIO))
+        btLauncher.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS))
 
         val key = EditText(this).apply {
             hint = "Gemini API key (from aistudio.google.com)"
@@ -48,9 +46,9 @@ class MainActivity : AppCompatActivity() {
             addView(key)
             addView(btn("1. Save key") { prefs.edit().putString("key", key.text.toString().trim()).apply(); log("Key saved") })
             addView(btn("2. Register with Meta AI app") { Glasses.register(this@MainActivity) })
-            addView(btn("3. Connect glasses") { Glasses.connect() })
+            addView(btn("3. Connect glasses") { KeepAliveService.start(this@MainActivity); Glasses.connect() })
             addView(btn("Ask from phone (test)") { Glasses.ask() })
-            addView(btn("Disconnect") { Glasses.disconnect() })
+            addView(btn("Disconnect") { Glasses.disconnect(); KeepAliveService.stop(this@MainActivity) })
             addView(logView)
         }
         setContentView(ScrollView(this).apply { addView(col, ViewGroup.LayoutParams(-1, -2)) })
