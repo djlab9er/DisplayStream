@@ -25,15 +25,15 @@ object Gemini {
         "You are an assistant on smart glasses with a tiny 600x600 display. Look at the photo " +
         "and say what the person is looking at and anything useful about it. Be brief."
 
-    suspend fun ask(key: String, photo: Bitmap, question: String?, model: String = DEFAULT_MODEL): Answer =
+    suspend fun ask(key: String, photo: Bitmap, question: String?, model: String = DEFAULT_MODEL, wav: ByteArray? = null): Answer =
         withContext(Dispatchers.IO) {
-            try { call(key, photo, question, model.ifBlank { DEFAULT_MODEL }, true) }
-            catch (e: ModelRejected) { call(key, photo, question, FALLBACK, false) }
+            try { call(key, photo, question, model.ifBlank { DEFAULT_MODEL }, true, wav) }
+            catch (e: ModelRejected) { call(key, photo, question, FALLBACK, false, wav) }
         }
 
     private class ModelRejected(msg: String) : Exception(msg)
 
-    private fun call(key: String, photo: Bitmap, question: String?, model: String, thinking: Boolean): Answer {
+    private fun call(key: String, photo: Bitmap, question: String?, model: String, thinking: Boolean, wav: ByteArray?): Answer {
         val scaled = scale(photo, 1024)
         val out = ByteArrayOutputStream()
         scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
@@ -52,7 +52,15 @@ object Gemini {
             .put("required", JSONArray(listOf("headline", "bullets", "spokenSummary")))
 
         val parts = JSONArray()
-            .put(JSONObject().put("text", question?.takeIf { it.isNotBlank() }?.let { "$PROMPT Question: $it" } ?: PROMPT))
+            .put(JSONObject().put("text", when {
+                wav != null -> "$PROMPT The attached audio is the person's spoken question about what they are looking at. Answer that question directly."
+                question?.isNotBlank() == true -> "$PROMPT Question: $question"
+                else -> PROMPT
+            }))
+            .apply {
+                if (wav != null) put(JSONObject().put("inline_data", JSONObject()
+                    .put("mime_type", "audio/wav").put("data", Base64.encodeToString(wav, Base64.NO_WRAP))))
+            }
             .put(JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg").put("data", b64)))
         val body = JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("parts", parts)))

@@ -7,6 +7,8 @@ import android.graphics.BitmapFactory
 import android.speech.tts.TextToSpeech
 import com.meta.wearable.dat.camera.Camera
 import com.meta.wearable.dat.camera.addCamera
+import com.meta.wearable.dat.camera.types.AudioCodec
+import com.meta.wearable.dat.camera.types.AudioSampleRate
 import com.meta.wearable.dat.camera.types.PhotoData
 import com.meta.wearable.dat.camera.types.StreamConfiguration
 import com.meta.wearable.dat.camera.types.StreamState
@@ -34,10 +36,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.Locale
 
 /** Owns the glasses session: registration, display, camera, and the ask-Gemini loop. */
@@ -52,7 +57,7 @@ object Glasses {
     var log: (String) -> Unit = {}
     var apiKey: () -> String = { "" }
     var model: () -> String = { "" }
-    var requestCamera: suspend () -> PermissionStatus = { PermissionStatus.Denied }
+    var requestPermission: suspend (Permission) -> PermissionStatus = { PermissionStatus.Denied }
 
     private fun say(s: String) { log(s) }
 
@@ -123,15 +128,20 @@ object Glasses {
     private fun home(note: String? = null) = show {
         flexBox(direction = Direction.COLUMN, gap = 12, padding = 24, background = FlexBoxBackground.CARD) {
             text("GEMINI", style = TextStyle.HEADING)
-            text(note ?: "Look at something, then pinch Ask.", style = TextStyle.BODY, color = TextColor.SECONDARY)
-            button("Ask", style = ButtonStyle.PRIMARY, iconName = IconName.CHECKMARK,
-                onClick = { ask() }, actionRole = ActionRole.PRIMARY)
+            text(note ?: "Look at something, then pinch.", style = TextStyle.BODY, color = TextColor.SECONDARY)
+            buttonGroup {
+                button("Speak", style = ButtonStyle.PRIMARY, iconName = IconName.CHECKMARK,
+                    onClick = { ask(true) }, actionRole = ActionRole.PRIMARY)
+                button("Look", style = ButtonStyle.SECONDARY,
+                    onClick = { ask(false) })
+            }
         }
     }
 
-    private fun thinking() = show {
-        flexBox(padding = 24, background = FlexBoxBackground.CARD) {
-            text("THINKING…", style = TextStyle.HEADING)
+    private fun status(title: String, sub: String? = null) = show {
+        flexBox(direction = Direction.COLUMN, gap = 12, padding = 24, background = FlexBoxBackground.CARD) {
+            text(title, style = TextStyle.HEADING)
+            if (sub != null) text(sub, style = TextStyle.BODY, color = TextColor.SECONDARY)
         }
     }
 
@@ -139,12 +149,15 @@ object Glasses {
         flexBox(direction = Direction.COLUMN, gap = 12, padding = 24, background = FlexBoxBackground.CARD) {
             text(a.headline, style = TextStyle.HEADING)
             a.bullets.forEach { text(it, style = TextStyle.BODY) }
-            button("Ask again", style = ButtonStyle.PRIMARY, iconName = IconName.CHECKMARK,
-                onClick = { ask() }, actionRole = ActionRole.PRIMARY)
+            buttonGroup {
+                button("Speak", style = ButtonStyle.PRIMARY, iconName = IconName.CHECKMARK,
+                    onClick = { ask(true) }, actionRole = ActionRole.PRIMARY)
+                button("Look", style = ButtonStyle.SECONDARY, onClick = { ask(false) })
+            }
         }
     }
 
-    fun ask() {
+    fun ask(voice: Boolean = false) {
         if (busy) return
         val s = session ?: run { say("Not connected"); return }
         if (display == null) { say("Display not ready"); return }
@@ -152,9 +165,10 @@ object Glasses {
         busy = true
         scope.launch {
             try {
-                thinking()
-                val bmp = takePhoto(s)
-                val a = Gemini.ask(apiKey(), bmp, null, model())
+                status(if (voice) "LISTENING…" else "LOOK…", if (voice) "Ask your question" else null)
+                val cap = capture(s, voice)
+                status("THINKING…")
+                val a = Gemini.ask(apiKey(), cap.photo, null, model(), cap.wav)
                 say("Gemini: ${a.headline}")
                 answer(a)
                 if (ttsReady) tts?.speak(a.spoken, TextToSpeech.QUEUE_FLUSH, null, "ans")
@@ -167,23 +181,68 @@ object Glasses {
         }
     }
 
-    private suspend fun takePhoto(s: DeviceSession): Bitmap {
-        val perm = Wearables.checkPermissionStatus(Permission.CAMERA)
+    private class Capture(val photo: Bitmap, val wav: ByteArray?)
+
+    private suspend fun ensure(p: Permission) {
         var granted = false
-        perm.fold(onSuccess = { granted = it == PermissionStatus.Granted }, onFailure = { e, _ -> say("Permission check: ${e.description}") })
-        if (!granted && requestCamera() != PermissionStatus.Granted) error("Camera permission denied")
+        Wearables.checkPermissionStatus(p).fold(
+            onSuccess = { granted = it == PermissionStatus.Granted },
+            onFailure = { e, _ -> say("Permission check: ${e.description}") })
+        if (!granted && requestPermission(p) != PermissionStatus.Granted) error("${p.name} permission denied")
+    }
+
+    private suspend fun capture(s: DeviceSession, voice: Boolean): Capture {
+        ensure(Permission.CAMERA)
+        if (voice) ensure(Permission.MICROPHONE)
 
         val cam = CompletableDeferred<Camera>()
-        s.addCamera(StreamConfiguration(videoQuality = VideoQuality.MEDIUM, frameRate = 15)).fold(
+        val cfg = StreamConfiguration(
+            audioCodec = if (voice) AudioCodec.PCM(AudioSampleRate.RATE_16000, 1) else null,
+            videoQuality = VideoQuality.LOW,
+            frameRate = 7,
+            compressVideo = true,
+        )
+        s.addCamera(cfg).fold(
             onSuccess = { cam.complete(it) },
             onFailure = { e, _ -> cam.completeExceptionally(IllegalStateException("addCamera: ${e.description}")) },
         )
         val camera = cam.await()
+        var audioJob: Job? = null
         try {
             val stream = camera.stream
+            val pcm = ByteArrayOutputStream()
+            val heard = MutableStateFlow(0L) // bumps on every loud frame
+            var lastLoud = 0L
+            var spoke = false
+            if (voice) {
+                audioJob = scope.launch(Dispatchers.Default) {
+                    stream.audioStream.collect { frame ->
+                        val sb = frame.buffer.duplicate().order(ByteOrder.nativeOrder()).asShortBuffer()
+                        if (!sb.hasRemaining()) return@collect
+                        var sum = 0.0
+                        val bytes = ByteArray(sb.remaining() * 2)
+                        val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+                        while (sb.hasRemaining()) { val v = sb.get(); sum += v.toDouble() * v; bb.putShort(v) }
+                        synchronized(pcm) { pcm.write(bytes) }
+                        val rms = Math.sqrt(sum / (bytes.size / 2))
+                        if (rms > 600) { spoke = true; lastLoud = System.currentTimeMillis(); heard.value = lastLoud }
+                    }
+                }
+            }
             stream.start().fold(onSuccess = {}, onFailure = { e, _ -> error("stream start: ${e.description}") })
             withTimeout(15_000) { stream.state.first { it == StreamState.STREAMING } }
-            delay(400) // let auto-exposure settle
+            if (voice) {
+                val t0 = System.currentTimeMillis()
+                while (true) {
+                    delay(100)
+                    val now = System.currentTimeMillis()
+                    if (spoke && now - lastLoud > 1300) break
+                    if (!spoke && now - t0 > 7000) error("I didn't hear anything")
+                    if (now - t0 > 15000) break
+                }
+            } else {
+                delay(400)
+            }
             val out = CompletableDeferred<Bitmap>()
             stream.capturePhoto().fold(
                 onSuccess = { p ->
@@ -199,9 +258,20 @@ object Glasses {
                 },
                 onFailure = { e, _ -> out.completeExceptionally(IllegalStateException("capture: ${e.description}")) },
             )
-            return out.await()
+            val photo = out.await()
+            val wav = if (voice) synchronized(pcm) { wavOf(pcm.toByteArray()) } else null
+            return Capture(photo, wav)
         } finally {
+            audioJob?.cancel()
             camera.stop()
         }
+    }
+
+    private fun wavOf(pcm: ByteArray, rate: Int = 16000): ByteArray {
+        val h = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
+        h.put("RIFF".toByteArray()).putInt(36 + pcm.size).put("WAVE".toByteArray())
+        h.put("fmt ".toByteArray()).putInt(16).putShort(1).putShort(1).putInt(rate).putInt(rate * 2).putShort(2).putShort(16)
+        h.put("data".toByteArray()).putInt(pcm.size)
+        return h.array() + pcm
     }
 }
