@@ -42,6 +42,11 @@ class MainActivity : AppCompatActivity() {
             setText(prefs.getString("model", Gemini.DEFAULT_MODEL))
             setSingleLine()
         }
+        val rateBox = EditText(this).apply {
+            hint = "Speech speed (0.5 slow - 1.5 fast, default 0.8)"
+            setText(prefs.getString("rate", ""))
+            setSingleLine()
+        }
         fun btn(t: String, f: () -> Unit) = Button(this).apply { text = t; setOnClickListener { f() } }
         logView = TextView(this).apply { textSize = 13f }
         val col = LinearLayout(this).apply {
@@ -50,7 +55,8 @@ class MainActivity : AppCompatActivity() {
             addView(TextView(context).apply { text = "Gemini Glasses"; textSize = 22f })
             addView(key)
             addView(modelBox)
-            addView(btn("1. Save key and model") { prefs.edit().putString("key", key.text.toString().trim()).putString("model", modelBox.text.toString().trim()).apply(); log("Key and model saved") })
+            addView(rateBox)
+            addView(btn("1. Save key and model") { prefs.edit().putString("key", key.text.toString().trim()).putString("model", modelBox.text.toString().trim()).putString("rate", rateBox.text.toString().trim()).apply(); log("Key and model saved") })
             addView(btn("2. Register with Meta AI app") { Glasses.register(this@MainActivity) })
             addView(btn("3. Connect glasses") { KeepAliveService.start(this@MainActivity); Glasses.connect() })
             addView(btn("Ask from phone (test, no voice)") { Glasses.ask(false) })
@@ -61,10 +67,7 @@ class MainActivity : AppCompatActivity() {
         }
         setContentView(ScrollView(this).apply { addView(col, ViewGroup.LayoutParams(-1, -2)) })
 
-        Glasses.initTts(this)
         Glasses.log = { s -> runOnUiThread { log(s) } }
-        Glasses.model = { prefs.getString("model", "") ?: "" }
-        Glasses.apiKey = { prefs.getString("key", "") ?: "" }
         Glasses.requestPermission = { perm ->
             suspendCancellableCoroutine { c ->
                 camCont = c

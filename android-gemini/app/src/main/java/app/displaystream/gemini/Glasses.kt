@@ -57,6 +57,8 @@ object Glasses {
     var log: (String) -> Unit = {}
     var apiKey: () -> String = { "" }
     var model: () -> String = { "" }
+    var speechRate: () -> Float = { 0.8f }
+    val active: Boolean get() = session != null
     var requestPermission: suspend (Permission) -> PermissionStatus = { PermissionStatus.Denied }
 
     private fun say(s: String) { log(s) }
@@ -171,7 +173,7 @@ object Glasses {
                 val a = Gemini.ask(apiKey(), cap.photo, null, model(), cap.wav)
                 say("Gemini: ${a.headline}")
                 answer(a)
-                if (ttsReady) tts?.speak(a.spoken, TextToSpeech.QUEUE_FLUSH, null, "ans")
+                if (ttsReady) tts?.setSpeechRate(speechRate()); tts?.speak(a.spoken, TextToSpeech.QUEUE_FLUSH, null, "ans")
             } catch (e: Exception) {
                 say("Ask failed: ${e.message}")
                 home("Failed: ${e.message?.take(120)}")
