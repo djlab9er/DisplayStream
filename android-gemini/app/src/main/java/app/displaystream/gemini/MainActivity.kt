@@ -54,6 +54,8 @@ class MainActivity : AppCompatActivity() {
             addView(btn("2. Register with Meta AI app") { Glasses.register(this@MainActivity) })
             addView(btn("3. Connect glasses") { KeepAliveService.start(this@MainActivity); Glasses.connect() })
             addView(btn("Ask from phone (test)") { Glasses.ask() })
+            addView(btn("Update glasses app (Meta AI)") { Wearables.openDATGlassesAppUpdate(this@MainActivity) })
+            addView(btn("Update glasses firmware (Meta AI)") { Wearables.openFirmwareUpdate(this@MainActivity) })
             addView(btn("Disconnect") { Glasses.disconnect(); KeepAliveService.stop(this@MainActivity) })
             addView(logView)
         }
