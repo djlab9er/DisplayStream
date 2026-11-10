@@ -51,6 +51,7 @@ object Glasses {
 
     var log: (String) -> Unit = {}
     var apiKey: () -> String = { "" }
+    var model: () -> String = { "" }
     var requestCamera: suspend () -> PermissionStatus = { PermissionStatus.Denied }
 
     private fun say(s: String) { log(s) }
@@ -153,7 +154,7 @@ object Glasses {
             try {
                 thinking()
                 val bmp = takePhoto(s)
-                val a = Gemini.ask(apiKey(), bmp, null)
+                val a = Gemini.ask(apiKey(), bmp, null, model())
                 say("Gemini: ${a.headline}")
                 answer(a)
                 if (ttsReady) tts?.speak(a.spoken, TextToSpeech.QUEUE_FLUSH, null, "ans")

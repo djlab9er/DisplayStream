@@ -16,7 +16,8 @@ import java.util.concurrent.TimeUnit
 data class Answer(val headline: String, val bullets: List<String>, val spoken: String)
 
 object Gemini {
-    const val MODEL = "gemini-2.5-flash"
+    const val DEFAULT_MODEL = "gemini-3.8-flash"
+    private const val FALLBACK = "gemini-2.5-flash"
     private val http = OkHttpClient.Builder()
         .callTimeout(40, TimeUnit.SECONDS).build()
 
@@ -24,7 +25,15 @@ object Gemini {
         "You are an assistant on smart glasses with a tiny 600x600 display. Look at the photo " +
         "and say what the person is looking at and anything useful about it. Be brief."
 
-    suspend fun ask(key: String, photo: Bitmap, question: String?): Answer = withContext(Dispatchers.IO) {
+    suspend fun ask(key: String, photo: Bitmap, question: String?, model: String = DEFAULT_MODEL): Answer =
+        withContext(Dispatchers.IO) {
+            try { call(key, photo, question, model.ifBlank { DEFAULT_MODEL }, true) }
+            catch (e: ModelRejected) { call(key, photo, question, FALLBACK, false) }
+        }
+
+    private class ModelRejected(msg: String) : Exception(msg)
+
+    private fun call(key: String, photo: Bitmap, question: String?, model: String, thinking: Boolean): Answer {
         val scaled = scale(photo, 1024)
         val out = ByteArrayOutputStream()
         scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
@@ -48,22 +57,29 @@ object Gemini {
         val body = JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("parts", parts)))
             .put("generationConfig", JSONObject()
+                .apply { if (thinking) put("thinkingConfig", JSONObject().put("thinkingLevel", "LOW")) }
                 .put("responseMimeType", "application/json")
                 .put("responseSchema", schema))
 
         val req = Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent")
+            .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
             .header("x-goog-api-key", key)
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
-        http.newCall(req).execute().use { r ->
+        return http.newCall(req).execute().use { r ->
             val txt = r.body?.string().orEmpty()
             if (!r.isSuccessful) {
                 val msg = runCatching { JSONObject(txt).getJSONObject("error").getString("message") }.getOrDefault(txt.take(200))
+                if (r.code == 400 || r.code == 404) throw ModelRejected("Gemini ${r.code} ($model): $msg")
                 error("Gemini ${r.code}: $msg")
             }
-            val text = JSONObject(txt).getJSONArray("candidates").getJSONObject(0)
-                .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
+            val ps = JSONObject(txt).getJSONArray("candidates").getJSONObject(0)
+                .getJSONObject("content").getJSONArray("parts")
+            var text = "{}"
+            for (i in 0 until ps.length()) {
+                val o = ps.getJSONObject(i)
+                if (!o.optBoolean("thought", false) && o.has("text")) text = o.getString("text")
+            }
             val j = JSONObject(text)
             val arr = j.getJSONArray("bullets")
             Answer(
