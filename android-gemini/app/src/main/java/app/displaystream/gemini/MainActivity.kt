@@ -37,6 +37,11 @@ class MainActivity : AppCompatActivity() {
             setText(prefs.getString("key", ""))
             setSingleLine()
         }
+        val modelBox = EditText(this).apply {
+            hint = "Model (default ${Gemini.DEFAULT_MODEL})"
+            setText(prefs.getString("model", Gemini.DEFAULT_MODEL))
+            setSingleLine()
+        }
         fun btn(t: String, f: () -> Unit) = Button(this).apply { text = t; setOnClickListener { f() } }
         logView = TextView(this).apply { textSize = 13f }
         val col = LinearLayout(this).apply {
@@ -44,7 +49,8 @@ class MainActivity : AppCompatActivity() {
             setPadding(32, 48, 32, 32)
             addView(TextView(context).apply { text = "Gemini Glasses"; textSize = 22f })
             addView(key)
-            addView(btn("1. Save key") { prefs.edit().putString("key", key.text.toString().trim()).apply(); log("Key saved") })
+            addView(modelBox)
+            addView(btn("1. Save key and model") { prefs.edit().putString("key", key.text.toString().trim()).putString("model", modelBox.text.toString().trim()).apply(); log("Key and model saved") })
             addView(btn("2. Register with Meta AI app") { Glasses.register(this@MainActivity) })
             addView(btn("3. Connect glasses") { KeepAliveService.start(this@MainActivity); Glasses.connect() })
             addView(btn("Ask from phone (test)") { Glasses.ask() })
@@ -55,6 +61,7 @@ class MainActivity : AppCompatActivity() {
 
         Glasses.initTts(this)
         Glasses.log = { s -> runOnUiThread { log(s) } }
+        Glasses.model = { prefs.getString("model", "") ?: "" }
         Glasses.apiKey = { prefs.getString("key", "") ?: "" }
         Glasses.requestCamera = {
             suspendCancellableCoroutine { c ->
