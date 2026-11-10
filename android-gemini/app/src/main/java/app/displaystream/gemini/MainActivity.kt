@@ -53,7 +53,7 @@ class MainActivity : AppCompatActivity() {
             addView(btn("1. Save key and model") { prefs.edit().putString("key", key.text.toString().trim()).putString("model", modelBox.text.toString().trim()).apply(); log("Key and model saved") })
             addView(btn("2. Register with Meta AI app") { Glasses.register(this@MainActivity) })
             addView(btn("3. Connect glasses") { KeepAliveService.start(this@MainActivity); Glasses.connect() })
-            addView(btn("Ask from phone (test)") { Glasses.ask() })
+            addView(btn("Ask from phone (test, no voice)") { Glasses.ask(false) })
             addView(btn("Update glasses app (Meta AI)") { Wearables.openDATGlassesAppUpdate(this@MainActivity) })
             addView(btn("Update glasses firmware (Meta AI)") { Wearables.openFirmwareUpdate(this@MainActivity) })
             addView(btn("Disconnect") { Glasses.disconnect(); KeepAliveService.stop(this@MainActivity) })
@@ -65,11 +65,11 @@ class MainActivity : AppCompatActivity() {
         Glasses.log = { s -> runOnUiThread { log(s) } }
         Glasses.model = { prefs.getString("model", "") ?: "" }
         Glasses.apiKey = { prefs.getString("key", "") ?: "" }
-        Glasses.requestCamera = {
+        Glasses.requestPermission = { perm ->
             suspendCancellableCoroutine { c ->
                 camCont = c
                 c.invokeOnCancellation { camCont = null }
-                camLauncher.launch(com.meta.wearable.dat.core.types.Permission.CAMERA)
+                camLauncher.launch(perm)
             }
         }
     }

@@ -10,6 +10,8 @@
     <application
         android:name=".App"
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="Gemini Glasses"
         android:theme="@style/AppTheme">
         <meta-data android:name="com.meta.wearable.mwdat.APPLICATION_ID" android:value="${mwdat_application_id}" />
