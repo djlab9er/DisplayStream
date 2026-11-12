@@ -21,7 +21,9 @@ class LaunchListener(private val code: String, private val onLaunch: () -> Unit)
     private var beat: Runnable? = null
     @Volatile private var stopped = false
 
-    fun start() { stopped = false; open() }
+    private var ntfy: WebSocket? = null
+
+    fun start() { stopped = false; open(); openNtfy() }
 
     private fun open() {
         if (stopped) return
@@ -48,6 +50,25 @@ class LaunchListener(private val code: String, private val onLaunch: () -> Unit)
         })
     }
 
+    /** Second relay (ntfy.sh): the glasses page can POST to a topic with a plain fetch(). */
+    private fun openNtfy() {
+        if (stopped) return
+        val url = "wss://ntfy.sh/pggem-${code.lowercase()}/ws"
+        ntfy = client.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                val m = try { JSONObject(text) } catch (e: Exception) { return }
+                if (m.optString("event") == "message") main.post { onLaunch() }
+            }
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = retryNtfy()
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = retryNtfy()
+        })
+    }
+
+    private fun retryNtfy() {
+        if (stopped) return
+        main.postDelayed({ openNtfy() }, 5000)
+    }
+
     private fun startBeat(w: WebSocket) {
         beat?.let { main.removeCallbacks(it) }
         val r = object : Runnable {
@@ -71,6 +92,7 @@ class LaunchListener(private val code: String, private val onLaunch: () -> Unit)
         stopped = true
         beat?.let { main.removeCallbacks(it) }
         ws?.close(1000, null)
+        ntfy?.close(1000, null)
         client.dispatcher.executorService.shutdown()
     }
 }
