@@ -232,6 +232,8 @@ object Glasses {
             val heard = MutableStateFlow(0L) // bumps on every loud frame
             var lastLoud = 0L
             var spoke = false
+            var frames = 0
+            var maxRms = 0
             if (voice) {
                 audioJob = scope.launch(Dispatchers.Default) {
                     stream.audioStream.collect { frame ->
@@ -243,6 +245,8 @@ object Glasses {
                         while (sb.hasRemaining()) { val v = sb.get(); sum += v.toDouble() * v; bb.putShort(v) }
                         synchronized(pcm) { pcm.write(bytes) }
                         val rms = Math.sqrt(sum / (bytes.size / 2))
+                        frames++
+                        if (rms.toInt() > maxRms) maxRms = rms.toInt()
                         if (rms > 600) { spoke = true; lastLoud = System.currentTimeMillis(); heard.value = lastLoud }
                     }
                 }
@@ -255,7 +259,7 @@ object Glasses {
                     delay(100)
                     val now = System.currentTimeMillis()
                     if (spoke && now - lastLoud > 1300) break
-                    if (!spoke && now - t0 > 7000) error("I didn't hear anything")
+                    if (!spoke && now - t0 > 7000) error(if (frames == 0) "No audio from glasses mic (turn off Hey Meta in Meta AI, close other mic apps)" else "I didn't hear anything (loudest $maxRms, need 600)")
                     if (now - t0 > 15000) break
                 }
             } else {
