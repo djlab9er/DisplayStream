@@ -52,6 +52,7 @@ object Glasses {
     private var display: Display? = null
     private var busy = false
     private var lastAnswer: Answer? = null
+    private var lastPhoto: Bitmap? = null
     private var lastAt = 0L
     private var tts: TextToSpeech? = null
     private var ttsReady = false
@@ -157,11 +158,19 @@ object Glasses {
         flexBox(direction = Direction.COLUMN, gap = 12, padding = 24, background = FlexBoxBackground.CARD) {
             text(a.headline, style = TextStyle.HEADING)
             a.bullets.forEach { text(it, style = TextStyle.BODY) }
-            actions()
+            buttonGroup {
+                if (lastPhoto != null) {
+                    button("Follow-up", style = ButtonStyle.PRIMARY, iconName = IconName.CHECKMARK,
+                        onClick = { ask(Mode.SPEAK, followUp = true) }, actionRole = ActionRole.PRIMARY)
+                    button("Home", style = ButtonStyle.SECONDARY, onClick = { home() })
+                } else {
+                    button("Home", style = ButtonStyle.PRIMARY, onClick = { home() }, actionRole = ActionRole.PRIMARY)
+                }
+            }
         }
     }
 
-    fun ask(mode: Mode = Mode.LOOK) {
+    fun ask(mode: Mode = Mode.LOOK, followUp: Boolean = false) {
         val voice = mode == Mode.SPEAK
         if (busy) return
         val s = session ?: run { say("Not connected"); return }
@@ -170,8 +179,10 @@ object Glasses {
         busy = true
         scope.launch {
             try {
-                status(if (voice) "LISTENING…" else if (mode == Mode.TRANSLATE) "READING…" else "LOOK…", if (voice) "Ask your question" else null)
-                val cap = capture(s, voice)
+                status(if (voice && followUp) "FOLLOW-UP…" else if (voice) "LISTENING…" else if (mode == Mode.TRANSLATE) "READING…" else "LOOK…", if (voice) "Ask your question" else null)
+                val reuse = if (followUp) lastPhoto else null
+                val cap = capture(s, voice, reuse)
+                lastPhoto = cap.photo
                 status("THINKING…")
                 val a = Gemini.ask(apiKey(), cap.photo, null, model(), cap.wav, mode,
                     lastAnswer?.takeIf { System.currentTimeMillis() - lastAt < 120_000 })
@@ -198,7 +209,7 @@ object Glasses {
         if (!granted && requestPermission(p) != PermissionStatus.Granted) error("${p.name} permission denied")
     }
 
-    private suspend fun capture(s: DeviceSession, voice: Boolean): Capture {
+    private suspend fun capture(s: DeviceSession, voice: Boolean, reuse: Bitmap? = null): Capture {
         ensure(Permission.CAMERA)
         if (voice) ensure(Permission.MICROPHONE)
 
@@ -249,6 +260,10 @@ object Glasses {
                 }
             } else {
                 delay(400)
+            }
+            if (reuse != null) {
+                val wav2 = if (voice) synchronized(pcm) { wavOf(pcm.toByteArray()) } else null
+                return Capture(reuse, wav2)
             }
             val out = CompletableDeferred<Bitmap>()
             stream.capturePhoto().fold(
