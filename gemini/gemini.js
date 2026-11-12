@@ -42,10 +42,10 @@
   function again(why) {
     if (answered) return;
     close();
-    if (tries < 4) {
+    if (tries < 15) {
       tries++;
       setStatus('Connecting… (' + tries + ')');
-      retry = setTimeout(function () { go(); }, 2000);
+      retry = setTimeout(function () { attempt(); }, 3000);
     } else {
       setStatus('No network (' + why + '). Tap Start Gemini to try again.');
     }
@@ -53,10 +53,13 @@
 
   // Primary route: a plain HTTPS request to ntfy.sh (the phone app listens on the same topic).
   // If that fails, fall back to the PeerJS broker route below.
-  function start() {
-    tries = 0; answered = false; close();
+  function start() { tries = 0; answered = false; attempt(); }
+  window.addEventListener('online', function () { if (!answered) start(); });
+
+  function attempt() {
+    close();
     $('pair').hidden = false;
-    setStatus('Contacting your phone…');
+    if (!tries) setStatus('Contacting your phone…');
     var done = false;
     var ctl = (typeof AbortController === 'function') ? new AbortController() : null;
     var t = setTimeout(function () { if (ctl) ctl.abort(); }, 6000);
