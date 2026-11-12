@@ -25,51 +25,62 @@
 
   var code = loadCode();
   $('code').textContent = code;
-  var ws = null, beat = null, answered = false, timer = null;
+  var peer = null, answered = false, timer = null, tries = 0, retry = null;
 
   function close() {
-    if (beat) { clearInterval(beat); beat = null; }
     if (timer) { clearTimeout(timer); timer = null; }
-    if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+    if (retry) { clearTimeout(retry); retry = null; }
+    if (peer) { try { peer.destroy(); } catch (e) {} peer = null; }
+  }
+  function noPhone(msg) {
+    setStatus(msg);
+    $('pair').hidden = false;
+    close();
+  }
+  // The glasses' network can take a few seconds to come up right after an app opens, so a failed
+  // first attempt is retried a few times before giving up.
+  function again(why) {
+    if (answered) return;
+    close();
+    if (tries < 4) {
+      tries++;
+      setStatus('Connecting… (' + tries + ')');
+      retry = setTimeout(function () { go(); }, 2000);
+    } else {
+      setStatus('No network (' + why + '). Tap Start Gemini to try again.');
+    }
   }
 
-  function start() {
+  function start() { tries = 0; answered = false; $('pair').hidden = true; go(); }
+
+  function go() {
     close();
-    answered = false;
-    $('pair').hidden = true;
     setStatus('Contacting your phone…');
-    var id = 'pgglaunch-' + makeCode();
-    var token = makeCode();
-    try {
-      ws = new WebSocket('wss://0.peerjs.com/peerjs?key=peerjs&id=' + id + '&token=' + token);
-    } catch (e) { setStatus('No network'); return; }
-    ws.onmessage = function (ev) {
-      var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
-      if (m.type === 'OPEN') {
-        beat = setInterval(function () { try { ws.send('{"type":"HEARTBEAT"}'); } catch (e) {} }, 5000);
-        ws.send(JSON.stringify({ type: 'OFFER', dst: 'pggem-' + code,
-          payload: { type: 'launch', connectionId: 'launch' } }));
-        timer = setTimeout(function () {
-          if (!answered) {
-            setStatus('Phone did not answer.');
-            $('pair').hidden = false;
+    // Same PeerJS loader and broker connection the Cast app uses on the glasses.
+    window.pgPeerReady.then(function () {
+      if (answered) return;
+      var me;
+      try { me = peer = window.pgMakePeer('pgglaunch-' + makeCode()); }
+      catch (e) { again('start'); return; }
+      me.on('open', function () {
+        if (me !== peer) return;
+        me.socket.on('message', function (m) {
+          if (me !== peer || !m) return;
+          if (m.type === 'ANSWER') {
+            answered = true;
+            setStatus('Starting Gemini… it will appear in a moment.');
             close();
+          } else if (m.type === 'EXPIRE') {
+            noPhone('Phone is not listening.');
           }
-        }, 8000);
-      } else if (m.type === 'ANSWER') {
-        answered = true;
-        setStatus('Starting Gemini… it will appear in a moment.');
-        close();
-      } else if (m.type === 'EXPIRE') {
-        setStatus('Phone is not listening.');
-        $('pair').hidden = false;
-        close();
-      } else if (m.type === 'ERROR' || m.type === 'ID-TAKEN') {
-        setStatus('Could not reach the broker.');
-        close();
-      }
-    };
-    ws.onerror = function () { if (!answered) setStatus('No network'); };
+        });
+        me.socket.send({ type: 'OFFER', dst: 'pggem-' + code,
+          payload: { type: 'launch', connectionId: 'launch' } });
+        timer = setTimeout(function () { if (!answered) noPhone('Phone did not answer.'); }, 8000);
+      });
+      me.on('error', function (e) { if (me === peer) again((e && e.type) || 'error'); });
+      me.on('disconnected', function () { if (me === peer && !answered && !timer) again('offline'); });
+    }, function () { again('library'); });
   }
 
   $('go').addEventListener('click', start);
