@@ -51,7 +51,22 @@
     }
   }
 
-  function start() { tries = 0; answered = false; $('pair').hidden = true; go(); }
+  // Primary route: a plain HTTPS request to ntfy.sh (the phone app listens on the same topic).
+  // If that fails, fall back to the PeerJS broker route below.
+  function start() {
+    tries = 0; answered = false; close();
+    $('pair').hidden = false;
+    setStatus('Contacting your phone…');
+    var done = false;
+    var ctl = (typeof AbortController === 'function') ? new AbortController() : null;
+    var t = setTimeout(function () { if (ctl) ctl.abort(); }, 6000);
+    fetch('https://ntfy.sh/pggem-' + code.toLowerCase(), { method: 'POST', body: 'launch', signal: ctl ? ctl.signal : undefined })
+      .then(function (r) {
+        clearTimeout(t); done = true;
+        if (r.ok) setStatus('Sent. Gemini should appear in a few seconds.');
+        else go();
+      }, function () { clearTimeout(t); if (!done) go(); });
+  }
 
   function go() {
     close();
