@@ -51,6 +51,8 @@ object Glasses {
     private var session: DeviceSession? = null
     private var display: Display? = null
     private var busy = false
+    private var lastAnswer: Answer? = null
+    private var lastAt = 0L
     private var tts: TextToSpeech? = null
     private var ttsReady = false
 
@@ -131,12 +133,16 @@ object Glasses {
         flexBox(direction = Direction.COLUMN, gap = 12, padding = 24, background = FlexBoxBackground.CARD) {
             text("GEMINI", style = TextStyle.HEADING)
             text(note ?: "Look at something, then pinch.", style = TextStyle.BODY, color = TextColor.SECONDARY)
-            buttonGroup {
-                button("Speak", style = ButtonStyle.PRIMARY, iconName = IconName.CHECKMARK,
-                    onClick = { ask(true) }, actionRole = ActionRole.PRIMARY)
-                button("Look", style = ButtonStyle.SECONDARY,
-                    onClick = { ask(false) })
-            }
+            actions()
+        }
+    }
+
+    private fun com.meta.wearable.dat.display.views.FlexBoxScope.actions() {
+        buttonGroup {
+            button("Speak", style = ButtonStyle.PRIMARY, iconName = IconName.CHECKMARK,
+                onClick = { ask(Mode.SPEAK) }, actionRole = ActionRole.PRIMARY)
+            button("Look", style = ButtonStyle.SECONDARY, onClick = { ask(Mode.LOOK) })
+            button("Translate", style = ButtonStyle.SECONDARY, onClick = { ask(Mode.TRANSLATE) })
         }
     }
 
@@ -151,15 +157,12 @@ object Glasses {
         flexBox(direction = Direction.COLUMN, gap = 12, padding = 24, background = FlexBoxBackground.CARD) {
             text(a.headline, style = TextStyle.HEADING)
             a.bullets.forEach { text(it, style = TextStyle.BODY) }
-            buttonGroup {
-                button("Speak", style = ButtonStyle.PRIMARY, iconName = IconName.CHECKMARK,
-                    onClick = { ask(true) }, actionRole = ActionRole.PRIMARY)
-                button("Look", style = ButtonStyle.SECONDARY, onClick = { ask(false) })
-            }
+            actions()
         }
     }
 
-    fun ask(voice: Boolean = false) {
+    fun ask(mode: Mode = Mode.LOOK) {
+        val voice = mode == Mode.SPEAK
         if (busy) return
         val s = session ?: run { say("Not connected"); return }
         if (display == null) { say("Display not ready"); return }
@@ -167,11 +170,13 @@ object Glasses {
         busy = true
         scope.launch {
             try {
-                status(if (voice) "LISTENING…" else "LOOK…", if (voice) "Ask your question" else null)
+                status(if (voice) "LISTENING…" else if (mode == Mode.TRANSLATE) "READING…" else "LOOK…", if (voice) "Ask your question" else null)
                 val cap = capture(s, voice)
                 status("THINKING…")
-                val a = Gemini.ask(apiKey(), cap.photo, null, model(), cap.wav)
+                val a = Gemini.ask(apiKey(), cap.photo, null, model(), cap.wav, mode,
+                    lastAnswer?.takeIf { System.currentTimeMillis() - lastAt < 120_000 })
                 say("Gemini: ${a.headline}")
+                lastAnswer = a; lastAt = System.currentTimeMillis()
                 answer(a)
                 if (ttsReady) tts?.setSpeechRate(speechRate()); tts?.speak(a.spoken, TextToSpeech.QUEUE_FLUSH, null, "ans")
             } catch (e: Exception) {

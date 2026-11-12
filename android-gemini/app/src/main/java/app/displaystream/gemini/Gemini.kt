@@ -13,6 +13,8 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
+enum class Mode { LOOK, SPEAK, TRANSLATE }
+
 data class Answer(val headline: String, val bullets: List<String>, val spoken: String)
 
 object Gemini {
@@ -25,15 +27,22 @@ object Gemini {
         "You are an assistant on smart glasses with a tiny 600x600 display. Look at the photo " +
         "and say what the person is looking at and anything useful about it. Be brief."
 
-    suspend fun ask(key: String, photo: Bitmap, question: String?, model: String = DEFAULT_MODEL, wav: ByteArray? = null): Answer =
-        withContext(Dispatchers.IO) {
-            try { call(key, photo, question, model.ifBlank { DEFAULT_MODEL }, true, wav) }
-            catch (e: ModelRejected) { call(key, photo, question, FALLBACK, false, wav) }
+    suspend fun ask(
+        key: String, photo: Bitmap, question: String?, model: String = DEFAULT_MODEL,
+        wav: ByteArray? = null, mode: Mode = Mode.LOOK, prev: Answer? = null,
+    ): Answer = withContext(Dispatchers.IO) {
+        val m = model.ifBlank { DEFAULT_MODEL }
+        try { call(key, photo, question, m, true, wav, mode, prev, mode == Mode.SPEAK) }
+        catch (e: ModelRejected) {
+            // Some models reject Google Search together with structured output: retry plain on the same model, then on the fallback.
+            try { call(key, photo, question, m, false, wav, mode, prev, false) }
+            catch (e2: ModelRejected) { call(key, photo, question, FALLBACK, false, wav, mode, prev, false) }
         }
+    }
 
     private class ModelRejected(msg: String) : Exception(msg)
 
-    private fun call(key: String, photo: Bitmap, question: String?, model: String, thinking: Boolean, wav: ByteArray?): Answer {
+    private fun call(key: String, photo: Bitmap, question: String?, model: String, thinking: Boolean, wav: ByteArray?, mode: Mode, prev: Answer?, grounded: Boolean): Answer {
         val scaled = scale(photo, 1024)
         val out = ByteArrayOutputStream()
         scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
@@ -52,10 +61,15 @@ object Gemini {
             .put("required", JSONArray(listOf("headline", "bullets", "spokenSummary")))
 
         val parts = JSONArray()
-            .put(JSONObject().put("text", when {
-                wav != null -> "$PROMPT The attached audio is the person's spoken question about what they are looking at. Answer that question directly."
-                question?.isNotBlank() == true -> "$PROMPT Question: $question"
-                else -> PROMPT
+            .put(JSONObject().put("text", buildString {
+                when (mode) {
+                    Mode.TRANSLATE -> append("You are an assistant on smart glasses with a tiny 600x600 display. Read all visible text in the photo, translate it into clear English, and highlight prices, key items or warnings. Be brief.")
+                    Mode.SPEAK -> append("$PROMPT The attached audio is the person's spoken question about what they are looking at. Answer that question directly, using up-to-date web knowledge if it helps.")
+                    Mode.LOOK -> append(PROMPT)
+                }
+                if (prev != null && mode == Mode.SPEAK)
+                    append("\nContext from the previous answer on the display: ${prev.headline} - ${prev.bullets.joinToString("; ")}")
+                if (question?.isNotBlank() == true) append("\nQuestion: $question")
             }))
             .apply {
                 if (wav != null) put(JSONObject().put("inline_data", JSONObject()
@@ -69,6 +83,7 @@ object Gemini {
                 .put("responseMimeType", "application/json")
                 .put("responseSchema", schema))
 
+        if (grounded) body.put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
         val req = Request.Builder()
             .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
             .header("x-goog-api-key", key)
