@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
  * pings that id, [onLaunch] runs and the glasses get an ANSWER back so they can say "starting".
  */
 class LaunchListener(private val code: String, private val onLaunch: () -> Unit) {
-    private val client = OkHttpClient.Builder().pingInterval(0, TimeUnit.SECONDS).build()
+    private val client = OkHttpClient.Builder().pingInterval(25, TimeUnit.SECONDS).build()
     private val main = Handler(Looper.getMainLooper())
     private var ws: WebSocket? = null
     private var beat: Runnable? = null
