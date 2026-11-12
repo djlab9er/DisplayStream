@@ -59,7 +59,7 @@ class MainActivity : AppCompatActivity() {
             addView(btn("1. Save key and model") { prefs.edit().putString("key", key.text.toString().trim()).putString("model", modelBox.text.toString().trim()).putString("rate", rateBox.text.toString().trim()).apply(); log("Key and model saved") })
             addView(btn("2. Register with Meta AI app") { Glasses.register(this@MainActivity) })
             addView(btn("3. Connect glasses") { KeepAliveService.start(this@MainActivity); Glasses.connect() })
-            addView(btn("Ask from phone (test, no voice)") { Glasses.ask(false) })
+            addView(btn("Ask from phone (test, no voice)") { Glasses.ask(Mode.LOOK) })
             addView(btn("Update glasses app (Meta AI)") { Wearables.openDATGlassesAppUpdate(this@MainActivity) })
             addView(btn("Update glasses firmware (Meta AI)") { Wearables.openFirmwareUpdate(this@MainActivity) })
             addView(btn("Disconnect") { Glasses.disconnect(); KeepAliveService.stop(this@MainActivity) })
