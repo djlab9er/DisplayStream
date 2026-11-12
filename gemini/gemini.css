@@ -1,0 +1,9 @@
+html, body { margin: 0; background: #000; color: #fff; font-family: system-ui, sans-serif; }
+body { width: 600px; height: 600px; overflow: hidden; }
+main { padding: 32px; text-align: center; }
+h1 { font-size: 44px; letter-spacing: 4px; margin: 20px 0 12px; }
+.status { font-size: 30px; margin: 12px 0; min-height: 80px; }
+.hint { font-size: 24px; color: #bbb; margin: 8px 0; }
+.code { font-size: 64px; font-weight: 700; letter-spacing: 8px; margin: 8px 0 20px; font-family: ui-monospace, monospace; }
+button { font-size: 32px; padding: 18px 36px; border-radius: 16px; border: 3px solid #fff; background: #222; color: #fff; }
+button:focus { outline: 4px solid #6cf; background: #123; }

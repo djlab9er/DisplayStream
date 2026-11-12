@@ -47,6 +47,11 @@ class MainActivity : AppCompatActivity() {
             setText(prefs.getString("rate", ""))
             setSingleLine()
         }
+        val launchBox = EditText(this).apply {
+            hint = "Glasses launcher code (shown in the Gemini app on the glasses)"
+            setText(prefs.getString("launch", ""))
+            setSingleLine()
+        }
         fun btn(t: String, f: () -> Unit) = Button(this).apply { text = t; setOnClickListener { f() } }
         logView = TextView(this).apply { textSize = 13f }
         val col = LinearLayout(this).apply {
@@ -56,6 +61,13 @@ class MainActivity : AppCompatActivity() {
             addView(key)
             addView(modelBox)
             addView(rateBox)
+            addView(launchBox)
+            addView(btn("Save launcher code (listen for glasses)") {
+                val c = launchBox.text.toString().trim().uppercase()
+                prefs.edit().putString("launch", c).apply()
+                if (c.isEmpty()) { if (!Glasses.active) KeepAliveService.stopAll(this@MainActivity); log("Launcher off") }
+                else { KeepAliveService.start(this@MainActivity); log("Launcher on: waiting for the glasses app") }
+            })
             addView(btn("1. Save key and model") { prefs.edit().putString("key", key.text.toString().trim()).putString("model", modelBox.text.toString().trim()).putString("rate", rateBox.text.toString().trim()).apply(); log("Key and model saved") })
             addView(btn("2. Register with Meta AI app") { Glasses.register(this@MainActivity) })
             addView(btn("3. Connect glasses") { KeepAliveService.start(this@MainActivity); Glasses.connect() })
