@@ -56,6 +56,8 @@ object Glasses {
     private var lastAt = 0L
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+    /** The screen currently meant to be on the lens, so it can be restored if the glasses interrupt the display. */
+    private var current: (com.meta.wearable.dat.display.views.ContentScope.() -> Unit)? = null
 
     var log: (String) -> Unit = {}
     var apiKey: () -> String = { "" }
@@ -92,7 +94,7 @@ object Glasses {
                     s.state.collect { st ->
                         say("Session: $st")
                         if (st == DeviceSessionState.STARTED && display == null) attachDisplay(s)
-                        if (st == DeviceSessionState.STOPPED) { session = null; display = null }
+                        if (st == DeviceSessionState.STOPPED) { session = null; display = null; current = null }
                     }
                 }
                 s.start()
@@ -112,7 +114,7 @@ object Glasses {
                 scope.launch {
                     d.state.collect { st ->
                         say("Display: $st")
-                        if (st == DisplayState.STARTED) home()
+                        if (st == DisplayState.STARTED) { val c = current; if (c != null) show(c) else home() }
                     }
                 }
             },
@@ -121,6 +123,7 @@ object Glasses {
     }
 
     private fun show(content: com.meta.wearable.dat.display.views.ContentScope.() -> Unit) {
+        current = content
         val d = display ?: return
         scope.launch {
             d.sendContent(content).fold(
