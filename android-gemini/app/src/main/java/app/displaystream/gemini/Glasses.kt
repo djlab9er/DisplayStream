@@ -83,35 +83,59 @@ object Glasses {
         Wearables.startRegistration(activity)
     }
 
-    /** Opens a session and shows the home screen on the lens. */
-    fun connect() {
+    private var sessionJob: Job? = null
+
+    /** Drops everything tied to the current session so the next connect() starts from a clean slate. */
+    private fun cleanup() {
+        sessionJob?.cancel(); sessionJob = null
+        session = null; display = null; current = null; busy = false
+    }
+
+    /** Opens a session and shows the home screen on the lens. Retries a few times if the glasses aren't ready. */
+    fun connect(attempt: Int = 0) {
         if (session != null) { say("Already connecting/connected"); return }
         Wearables.createSession(AutoDeviceSelector(filter = { it.isDisplayCapable() })).fold(
             onSuccess = { s ->
                 session = s
-                scope.launch { s.errors.collect { say("Session error: ${it.description}") } }
-                scope.launch {
+                val job = SupervisorJob()
+                sessionJob = job
+                val ss = CoroutineScope(job + Dispatchers.Main)
+                ss.launch {
+                    s.errors.collect {
+                        say("Session error: ${it.description}")
+                        // The glasses ended it. If the state never reaches STOPPED, don't stay stuck as "connected".
+                        ss.launch {
+                            delay(2500)
+                            if (session === s) { try { s.stop() } catch (e: Exception) {}; cleanup() }
+                        }
+                    }
+                }
+                ss.launch {
                     s.state.collect { st ->
                         say("Session: $st")
-                        if (st == DeviceSessionState.STARTED && display == null) attachDisplay(s)
-                        if (st == DeviceSessionState.STOPPED) { session = null; display = null; current = null }
+                        if (st == DeviceSessionState.STARTED && display == null) attachDisplay(s, ss)
+                        if (st == DeviceSessionState.STOPPED && session === s) cleanup()
                     }
                 }
                 s.start()
             },
-            onFailure = { e, _ -> say("Could not create session: ${e.description}") },
+            onFailure = { e, _ ->
+                say("Could not create session: ${e.description}")
+                if (attempt < 3) scope.launch { delay(4000); if (session == null) connect(attempt + 1) }
+            },
         )
     }
 
     fun disconnect() {
-        session?.stop(); session = null; display = null
+        try { session?.stop() } catch (e: Exception) {}
+        cleanup()
     }
 
-    private fun attachDisplay(s: DeviceSession) {
+    private fun attachDisplay(s: DeviceSession, ss: CoroutineScope) {
         s.addDisplay().fold(
             onSuccess = { d ->
                 display = d
-                scope.launch {
+                ss.launch {
                     d.state.collect { st ->
                         say("Display: $st")
                         if (st == DisplayState.STARTED) { val c = current; if (c != null) show(c) else home() }
