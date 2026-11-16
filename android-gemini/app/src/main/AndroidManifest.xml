@@ -27,7 +27,7 @@
             </intent-filter>
         </service>
         <service android:name=".KeepAliveService" android:exported="false" android:foregroundServiceType="connectedDevice" />
-        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask">
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

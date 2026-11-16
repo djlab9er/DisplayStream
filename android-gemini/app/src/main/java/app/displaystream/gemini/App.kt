@@ -9,6 +9,7 @@ class App : Application() {
         super.onCreate()
         Wearables.initialize(this)
         val prefs = getSharedPreferences("gg", Context.MODE_PRIVATE)
+        Glasses.log = { AppLog.add(it) }
         Glasses.initTts(this)
         Glasses.apiKey = { prefs.getString("key", "") ?: "" }
         Glasses.model = { prefs.getString("model", "") ?: "" }
