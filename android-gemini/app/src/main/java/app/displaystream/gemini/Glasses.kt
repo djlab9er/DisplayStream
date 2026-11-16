@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import com.meta.wearable.dat.camera.Camera
 import com.meta.wearable.dat.camera.addCamera
 import com.meta.wearable.dat.camera.types.AudioCodec
@@ -39,11 +40,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale
+
+/** What the phone screen shows about the link to the glasses. */
+enum class Link { OFF, CONNECTING, READY, BUSY }
 
 /** Owns the glasses session: registration, display, camera, and the ask-Gemini loop. */
 object Glasses {
@@ -52,7 +57,13 @@ object Glasses {
     private var display: Display? = null
     private var busy = false
     private var lastAnswer: Answer? = null
-    private var lastPhoto: Bitmap? = null
+    /** The last photo as sent to Gemini (small JPEG), kept for follow-up questions. */
+    private var lastJpeg: ByteArray? = null
+    private var lastMode = Mode.LOOK
+    /** When the spoken answer finished; 0 when not relevant. Used to recover if the glasses close the screen then. */
+    private var speechDoneAt = 0L
+    private var restore: Answer? = null
+    private var registrationWatched = false
     private var lastAt = 0L
     private var tts: TextToSpeech? = null
     private var ttsReady = false
@@ -64,6 +75,12 @@ object Glasses {
     var model: () -> String = { "" }
     var speechRate: () -> Float = { 0.8f }
     val active: Boolean get() = session != null
+
+    /** Link state for the phone screen; [onStatus] is called on the main thread when it changes. */
+    var link = Link.OFF
+        private set
+    var onStatus: ((Link) -> Unit)? = null
+    private fun mark(l: Link) { if (link != l) { link = l; onStatus?.invoke(l) } }
     var requestPermission: suspend (Permission) -> PermissionStatus = { PermissionStatus.Denied }
 
     private fun say(s: String) { log(s) }
@@ -71,14 +88,24 @@ object Glasses {
     fun initTts(c: Context) {
         if (tts != null) return
         tts = TextToSpeech(c.applicationContext) { ok ->
-            if (ok == TextToSpeech.SUCCESS) { tts?.language = Locale.getDefault(); ttsReady = true }
+            if (ok == TextToSpeech.SUCCESS) {
+                tts?.language = Locale.getDefault()
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {}
+                    override fun onDone(utteranceId: String?) { speechDoneAt = System.currentTimeMillis() }
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) {}
+                })
+                ttsReady = true
+            }
         }
     }
 
     fun register(activity: Activity) {
-        scope.launch { Wearables.registrationErrorStream.collect { say("Registration error: ${it.description}") } }
-        scope.launch {
-            Wearables.registrationState.collect { say("Registration: $it") }
+        if (!registrationWatched) {
+            registrationWatched = true
+            scope.launch { Wearables.registrationErrorStream.collect { say("Registration error: ${it.description}") } }
+            scope.launch { Wearables.registrationState.collect { say("Registration: $it") } }
         }
         Wearables.startRegistration(activity)
     }
@@ -89,11 +116,30 @@ object Glasses {
     private fun cleanup() {
         sessionJob?.cancel(); sessionJob = null
         session = null; display = null; current = null; busy = false
+        mark(Link.OFF)
+    }
+
+    /**
+     * The glasses ended the session. If that happened right after a spoken answer to a voice question
+     * (the glasses seem to close the screen when that audio ends), reopen once and put the answer back.
+     */
+    private fun endedByGlasses() {
+        val a = lastAnswer
+        val revive = a != null && lastMode == Mode.SPEAK && speechDoneAt != 0L &&
+            System.currentTimeMillis() - speechDoneAt < 4000
+        speechDoneAt = 0L
+        cleanup()
+        if (revive) {
+            say("Glasses closed the screen right after speaking: reopening the answer")
+            restore = a
+            scope.launch { delay(1000); if (session == null) connect() }
+        }
     }
 
     /** Opens a session and shows the home screen on the lens. Retries a few times if the glasses aren't ready. */
     fun connect(attempt: Int = 0) {
         if (session != null) { say("Already connecting/connected"); return }
+        mark(Link.CONNECTING)
         Wearables.createSession(AutoDeviceSelector(filter = { it.isDisplayCapable() })).fold(
             onSuccess = { s ->
                 session = s
@@ -106,7 +152,7 @@ object Glasses {
                         // The glasses ended it. If the state never reaches STOPPED, don't stay stuck as "connected".
                         ss.launch {
                             delay(2500)
-                            if (session === s) { try { s.stop() } catch (e: Exception) {}; cleanup() }
+                            if (session === s) { try { s.stop() } catch (e: Exception) {}; endedByGlasses() }
                         }
                     }
                 }
@@ -114,7 +160,7 @@ object Glasses {
                     s.state.collect { st ->
                         say("Session: $st")
                         if (st == DeviceSessionState.STARTED && display == null) attachDisplay(s, ss)
-                        if (st == DeviceSessionState.STOPPED && session === s) cleanup()
+                        if (st == DeviceSessionState.STOPPED && session === s) endedByGlasses()
                     }
                 }
                 s.start()
@@ -122,12 +168,15 @@ object Glasses {
             onFailure = { e, _ ->
                 say("Could not create session: ${e.description}")
                 if (attempt < 3) scope.launch { delay(4000); if (session == null) connect(attempt + 1) }
+                else mark(Link.OFF)
             },
         )
     }
 
     fun disconnect() {
         try { session?.stop() } catch (e: Exception) {}
+        restore = null; speechDoneAt = 0L
+        tts?.stop()
         cleanup()
     }
 
@@ -138,7 +187,13 @@ object Glasses {
                 ss.launch {
                     d.state.collect { st ->
                         say("Display: $st")
-                        if (st == DisplayState.STARTED) { val c = current; if (c != null) show(c) else home() }
+                        if (st == DisplayState.STARTED) {
+                            if (!busy) mark(Link.READY)
+                            val c = current
+                            val r = restore
+                            restore = null
+                            if (c != null) show(c) else if (r != null) answer(r) else home()
+                        }
                     }
                 }
             },
@@ -186,7 +241,7 @@ object Glasses {
             text(a.headline, style = TextStyle.HEADING)
             a.bullets.forEach { text(it, style = TextStyle.BODY) }
             buttonGroup {
-                if (lastPhoto != null) {
+                if (lastJpeg != null) {
                     button("Follow-up", style = ButtonStyle.PRIMARY, iconName = IconName.CHECKMARK,
                         onClick = { ask(Mode.SPEAK, followUp = true) }, actionRole = ActionRole.PRIMARY)
                     button("Home", style = ButtonStyle.SECONDARY, onClick = { home() })
@@ -204,29 +259,41 @@ object Glasses {
         if (display == null) { say("Display not ready"); return }
         if (apiKey().isBlank()) { home("Add your Gemini key in the phone app."); return }
         busy = true
+        mark(Link.BUSY)
+        speechDoneAt = 0L
+        tts?.stop()
         scope.launch {
             try {
                 status(if (voice && followUp) "FOLLOW-UP…" else if (voice) "LISTENING…" else if (mode == Mode.TRANSLATE) "READING…" else "LOOK…", if (voice) "Ask your question" else null)
-                val reuse = if (followUp) lastPhoto else null
-                val cap = capture(s, voice, reuse)
-                lastPhoto = cap.photo
+                val reuse = if (followUp) lastJpeg else null
+                val cap = capture(s, voice, skipPhoto = reuse != null)
                 status("THINKING…")
-                val a = Gemini.ask(apiKey(), cap.photo, null, model(), cap.wav, mode,
-                    lastAnswer?.takeIf { System.currentTimeMillis() - lastAt < 120_000 })
-                say("Gemini: ${a.headline}")
-                lastAnswer = a; lastAt = System.currentTimeMillis()
+                val photo = cap.photo
+                val jpeg = reuse ?: withContext(Dispatchers.Default) {
+                    Gemini.encode(photo ?: error("No photo"), Gemini.edgeFor(mode))
+                }
+                lastJpeg = jpeg
+                val t0 = System.currentTimeMillis()
+                val a = Gemini.ask(apiKey(), jpeg, model(), cap.wav, mode,
+                    lastAnswer?.takeIf { System.currentTimeMillis() - lastAt < 120_000 }) { say(it) }
+                say("Gemini: ${a.headline} (${(System.currentTimeMillis() - t0) / 100 / 10.0}s)")
+                lastAnswer = a; lastAt = System.currentTimeMillis(); lastMode = mode
                 answer(a)
-                if (ttsReady) tts?.setSpeechRate(speechRate()); tts?.speak(a.spoken, TextToSpeech.QUEUE_FLUSH, null, "ans")
+                if (ttsReady) {
+                    tts?.setSpeechRate(speechRate())
+                    tts?.speak(a.spoken, TextToSpeech.QUEUE_FLUSH, null, "ans")
+                }
             } catch (e: Exception) {
                 say("Ask failed: ${e.message}")
                 home("Failed: ${e.message?.take(120)}")
             } finally {
                 busy = false
+                if (session != null) mark(if (display != null) Link.READY else Link.CONNECTING)
             }
         }
     }
 
-    private class Capture(val photo: Bitmap, val wav: ByteArray?)
+    private class Capture(val photo: Bitmap?, val wav: ByteArray?)
 
     private suspend fun ensure(p: Permission) {
         var granted = false
@@ -236,7 +303,7 @@ object Glasses {
         if (!granted && requestPermission(p) != PermissionStatus.Granted) error("${p.name} permission denied")
     }
 
-    private suspend fun capture(s: DeviceSession, voice: Boolean, reuse: Bitmap? = null): Capture {
+    private suspend fun capture(s: DeviceSession, voice: Boolean, skipPhoto: Boolean = false): Capture {
         ensure(Permission.CAMERA)
         if (voice) ensure(Permission.MICROPHONE)
 
@@ -292,9 +359,9 @@ object Glasses {
             } else {
                 delay(400)
             }
-            if (reuse != null) {
+            if (skipPhoto) {
                 val wav2 = if (voice) synchronized(pcm) { wavOf(pcm.toByteArray()) } else null
-                return Capture(reuse, wav2)
+                return Capture(null, wav2)
             }
             val out = CompletableDeferred<Bitmap>()
             stream.capturePhoto().fold(

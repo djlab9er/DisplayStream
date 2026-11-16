@@ -3,6 +3,7 @@ package app.displaystream.gemini
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -23,7 +24,8 @@ class KeepAliveService : Service() {
         val n = Notification.Builder(this, "gg")
             .setContentTitle("Gemini Glasses running")
             .setContentText(if (code.isNotEmpty()) "Waiting for the glasses launcher" else "Connected to your glasses")
-            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setSmallIcon(R.drawable.ic_tile)
+            .setContentIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
             .setOngoing(true)
             .build()
         startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
