@@ -468,6 +468,9 @@ object Glasses {
                 ?: error("photo took too long")
             return Capture(photo, wav)
         } finally {
+            // The glasses closed their link once right as the photo finished and audio started.
+            // Give them a moment before putting the lens back and before any sound plays.
+            delay(1500)
             reattachDisplay(s)
         }
     }
@@ -507,7 +510,6 @@ object Glasses {
                 return null
             }
             standaloneOk = true
-            try { shutter.play(android.media.MediaActionSound.SHUTTER_CLICK) } catch (e: Exception) {}
             say("Photo (new method) in ${System.currentTimeMillis() - t0} ms")
             return b
         } catch (e: Exception) {
