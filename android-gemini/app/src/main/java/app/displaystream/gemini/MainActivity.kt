@@ -319,18 +319,20 @@ class MainActivity : AppCompatActivity() {
         }
         setContentView(scroll)
 
-        Glasses.requestPermission = { perm ->
-            suspendCancellableCoroutine { c ->
-                camCont = c
-                c.invokeOnCancellation { camCont = null }
-                camLauncher.launch(perm)
-            }
-        }
     }
 
     override fun onStart() {
         super.onStart()
         Glasses.onStatus = { render(it) }
+        // Meta's permission prompt must be launched from a live, visible screen.
+        Glasses.requestPermission = { perm ->
+            suspendCancellableCoroutine { c ->
+                camCont?.resume(PermissionStatus.Denied)
+                camCont = c
+                c.invokeOnCancellation { camCont = null }
+                camLauncher.launch(perm)
+            }
+        }
         AppLog.onChange = { logView.text = AppLog.text().ifEmpty { "Nothing yet." } }
         render(Glasses.link)
         AppLog.onChange?.invoke()
@@ -338,6 +340,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         Glasses.onStatus = null
+        Glasses.requestPermission = null
         AppLog.onChange = null
         super.onStop()
     }
