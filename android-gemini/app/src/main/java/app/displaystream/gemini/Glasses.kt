@@ -165,6 +165,7 @@ object Glasses {
     private fun cleanup() {
         sessionJob?.cancel(); sessionJob = null
         session = null; display = null; current = null; busy = false; standaloneOk = null
+        displayUp.value = false
         mark(Link.OFF)
     }
 
@@ -174,12 +175,13 @@ object Glasses {
      */
     private fun endedByGlasses() {
         val a = lastAnswer
-        val revive = a != null && lastMode == Mode.SPEAK && speechDoneAt != 0L &&
-            System.currentTimeMillis() - speechDoneAt < 4000
+        val unseen = !answerShown && answerPending != null
+        val revive = a != null && (unseen || (lastMode == Mode.SPEAK && speechDoneAt != 0L &&
+            System.currentTimeMillis() - speechDoneAt < 4000))
         speechDoneAt = 0L
         cleanup()
         if (revive) {
-            say("Glasses closed the screen right after speaking: reopening the answer")
+            say(if (unseen) "Answer never reached the lens: reopening to show it" else "Glasses closed the screen right after speaking: reopening the answer")
             restore = a
             scope.launch { delay(1000); if (session == null) connect() }
         }
@@ -249,12 +251,14 @@ object Glasses {
                 ss.launch {
                     d.state.collect { st ->
                         say("Display: $st")
+                        displayUp.value = st == DisplayState.STARTED
                         if (st == DisplayState.STARTED) {
                             if (!busy) mark(Link.READY)
                             val c = current
                             val r = restore
                             restore = null
-                            if (c != null) show(c) else if (r != null) answer(r) else home()
+                            val pend = answerPending
+                            if (pend != null && !answerShown) answer(pend) else if (c != null) show(content = c) else if (r != null) answer(r) else home()
                         }
                     }
                 }
@@ -264,21 +268,29 @@ object Glasses {
     }
 
     private val sendLock = Mutex()
+    /** True while the lens accepts content. The glasses briefly drop it after a photo transfer. */
+    private val displayUp = MutableStateFlow(false)
+    /** The latest answer has been put on the lens successfully. */
+    private var answerShown = true
+    private var answerPending: Answer? = null
+    private val shutter by lazy { android.media.MediaActionSound().apply { load(android.media.MediaActionSound.SHUTTER_CLICK) } }
     private var screenVersion = 0
 
     /**
      * Puts a screen on the lens. Sends go one at a time and a screen that has already been replaced is skipped,
      * so a slow "THINKING…" can never land on top of the answer.
      */
-    private fun show(content: com.meta.wearable.dat.display.views.ContentScope.() -> Unit) {
+    private fun show(isAnswer: Boolean = false, content: com.meta.wearable.dat.display.views.ContentScope.() -> Unit) {
         current = content
         val v = ++screenVersion
         scope.launch {
             sendLock.withLock {
                 if (v != screenVersion) return@withLock
+                // Don't send while the lens is down; the STARTED handler re-sends the current screen.
+                if (!displayUp.value) return@withLock
                 val d = display ?: return@withLock
                 d.sendContent(content).fold(
-                    onSuccess = {},
+                    onSuccess = { if (isAnswer && v == screenVersion) { answerShown = true; answerPending = null } },
                     onFailure = { e, _ -> say("Display send failed: ${e.description}") },
                 )
             }
@@ -289,7 +301,7 @@ object Glasses {
     private fun reshow(afterMs: Long) {
         val c = current ?: return
         val v = screenVersion
-        scope.launch { delay(afterMs); if (v == screenVersion && current === c) show(c) }
+        scope.launch { delay(afterMs); if (v == screenVersion && current === c) show(content = c) }
     }
 
     private fun home(note: String? = null) = show {
@@ -316,7 +328,9 @@ object Glasses {
         }
     }
 
-    private fun answer(a: Answer) = show {
+    private fun answer(a: Answer) {
+        answerShown = false; answerPending = a
+        show(isAnswer = true, content = {
         flexBox(direction = Direction.COLUMN, gap = 12, padding = 24, background = FlexBoxBackground.CARD) {
             text(a.headline, style = TextStyle.HEADING)
             a.bullets.forEach { text(it, style = TextStyle.BODY) }
@@ -330,7 +344,9 @@ object Glasses {
                 }
             }
         }
+        })
     }
+
 
     fun ask(mode: Mode = Mode.LOOK, followUp: Boolean = false) {
         val voice = mode == Mode.SPEAK
@@ -361,6 +377,8 @@ object Glasses {
                 lastAnswer = a; lastAt = System.currentTimeMillis(); lastMode = mode
                 answer(a)
                 reshow(1500)
+                // Speak once the answer can be seen too (the lens can be down for a few seconds after a photo).
+                withTimeoutOrNull(8000) { displayUp.first { it } }
                 if (ttsReady) {
                     tts?.setSpeechRate(speechRate())
                     tts?.speak(a.spoken, TextToSpeech.QUEUE_FLUSH, null, "ans")
@@ -448,6 +466,7 @@ object Glasses {
                 return null
             }
             standaloneOk = true
+            try { shutter.play(android.media.MediaActionSound.SHUTTER_CLICK) } catch (e: Exception) {}
             say("Photo (new method) in ${System.currentTimeMillis() - t0} ms")
             return b
         } catch (e: Exception) {
