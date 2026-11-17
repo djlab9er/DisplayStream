@@ -323,7 +323,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        Glasses.onStatus = { render(it) }
+        Glasses.onStatus = { l -> runOnUiThread { render(l) } }
         // Meta's permission prompt must be launched from a live, visible screen.
         Glasses.requestPermission = { perm ->
             suspendCancellableCoroutine { c ->
