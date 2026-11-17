@@ -11,6 +11,9 @@ import com.meta.wearable.dat.camera.addCamera
 import com.meta.wearable.dat.camera.types.AudioCodec
 import com.meta.wearable.dat.camera.types.AudioSampleRate
 import com.meta.wearable.dat.camera.types.PhotoData
+import com.meta.wearable.dat.camera.types.PhotoQuality
+import com.meta.wearable.dat.camera.types.PhotoResolution
+import com.meta.wearable.dat.camera.types.PhotoState
 import com.meta.wearable.dat.camera.types.StreamConfiguration
 import com.meta.wearable.dat.camera.types.StreamState
 import com.meta.wearable.dat.camera.types.VideoQuality
@@ -164,7 +167,7 @@ object Glasses {
     /** Drops everything tied to the current session so the next connect() starts from a clean slate. */
     private fun cleanup() {
         sessionJob?.cancel(); sessionJob = null
-        session = null; display = null; current = null; busy = false
+        session = null; display = null; current = null; busy = false; standaloneOk = null
         mark(Link.OFF)
     }
 
@@ -398,9 +401,79 @@ object Glasses {
         if (r == PermissionStatus.Denied) error("${p.name} permission denied in Meta AI")
     }
 
+    /**
+     * Gets what an ask needs. Following Meta's guidance, the photo is taken with the standalone photo feature
+     * (no video stream running), after any voice recording has finished. If that feature doesn't work on these
+     * glasses, it falls back to the older in-stream photo and stops trying the standalone one until reconnect.
+     */
     private suspend fun capture(s: DeviceSession, voice: Boolean, skipPhoto: Boolean = false): Capture {
         ensure(Permission.CAMERA)
         if (voice) ensure(Permission.MICROPHONE)
+        if (skipPhoto) return streamCapture(s, voice, skipPhoto = true)
+        val wav = if (voice) streamCapture(s, voice = true, skipPhoto = true).wav else null
+        if (voice) status("TAKING PHOTO…")
+        val photo = standalonePhoto(s) ?: streamCapture(s, voice = false, skipPhoto = false).photo
+        return Capture(photo, wav)
+    }
+
+    /** null = not tried yet, false = didn't work on these glasses (skip until reconnect). */
+    private var standaloneOk: Boolean? = null
+
+    private suspend fun standalonePhoto(s: DeviceSession): Bitmap? {
+        if (standaloneOk == false) return null
+        val t0 = System.currentTimeMillis()
+        val camera = s.addCamera(StreamConfiguration(videoQuality = VideoQuality.LOW, frameRate = 7, compressVideo = true)).fold(
+            onSuccess = { it },
+            onFailure = { e, _ -> say("Photo (new method): camera unavailable: ${e.description}"); null },
+        ) ?: return null
+        val jobs = mutableListOf<Job>()
+        try {
+            val photo = camera.photo
+            val result = CompletableDeferred<Bitmap?>()
+            jobs += scope.launch { photo.errors.collect { say("Photo (new method) error: $it"); result.complete(null) } }
+            jobs += scope.launch {
+                photo.photoStream.collect { c ->
+                    val data: Any = c.imageData
+                    result.complete(withContext(Dispatchers.Default) { decodeImage(data) })
+                }
+            }
+            val ready = withTimeoutOrNull(5000) { photo.state.first { it == PhotoState.STARTED } }
+            if (ready == null) {
+                say("Photo (new method): not ready after 5 s, using the old method")
+                standaloneOk = false
+                return null
+            }
+            photo.capturePhoto(resolution = PhotoResolution.MEDIUM, quality = PhotoQuality.MEDIUM)
+            val b = withTimeoutOrNull(12_000) { result.await() }
+            if (b == null) {
+                say("Photo (new method) failed, using the old method")
+                standaloneOk = false
+                return null
+            }
+            standaloneOk = true
+            say("Photo (new method) in ${System.currentTimeMillis() - t0} ms")
+            return b
+        } catch (e: Exception) {
+            say("Photo (new method) error: ${e.message}")
+            standaloneOk = false
+            return null
+        } finally {
+            jobs.forEach { it.cancel() }
+            camera.stop()
+        }
+    }
+
+    private fun decodeImage(data: Any): Bitmap? {
+        val bytes = when (data) {
+            is ByteArray -> data
+            is ByteBuffer -> { val b = data.duplicate().apply { rewind() }; ByteArray(b.remaining()).also { b.get(it) } }
+            else -> return null
+        }
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }
+
+    /** The older path: a camera stream (with the glasses mic for voice) and, if needed, an in-stream photo. */
+    private suspend fun streamCapture(s: DeviceSession, voice: Boolean, skipPhoto: Boolean): Capture {
 
         val cam = CompletableDeferred<Camera>()
         val cfg = StreamConfiguration(
