@@ -42,6 +42,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -259,15 +261,33 @@ object Glasses {
         )
     }
 
+    private val sendLock = Mutex()
+    private var screenVersion = 0
+
+    /**
+     * Puts a screen on the lens. Sends go one at a time and a screen that has already been replaced is skipped,
+     * so a slow "THINKING…" can never land on top of the answer.
+     */
     private fun show(content: com.meta.wearable.dat.display.views.ContentScope.() -> Unit) {
         current = content
-        val d = display ?: return
+        val v = ++screenVersion
         scope.launch {
-            d.sendContent(content).fold(
-                onSuccess = {},
-                onFailure = { e, _ -> say("Display send failed: ${e.description}") },
-            )
+            sendLock.withLock {
+                if (v != screenVersion) return@withLock
+                val d = display ?: return@withLock
+                d.sendContent(content).fold(
+                    onSuccess = {},
+                    onFailure = { e, _ -> say("Display send failed: ${e.description}") },
+                )
+            }
         }
+    }
+
+    /** Sends the current screen again (used after the camera releases the lens, which can drop an update). */
+    private fun reshow(afterMs: Long) {
+        val c = current ?: return
+        val v = screenVersion
+        scope.launch { delay(afterMs); if (v == screenVersion && current === c) show(c) }
     }
 
     private fun home(note: String? = null) = show {
@@ -338,6 +358,7 @@ object Glasses {
                 say("Gemini: ${a.headline} (${(System.currentTimeMillis() - t0) / 100 / 10.0}s)")
                 lastAnswer = a; lastAt = System.currentTimeMillis(); lastMode = mode
                 answer(a)
+                reshow(1500)
                 if (ttsReady) {
                     tts?.setSpeechRate(speechRate())
                     tts?.speak(a.spoken, TextToSpeech.QUEUE_FLUSH, null, "ans")
