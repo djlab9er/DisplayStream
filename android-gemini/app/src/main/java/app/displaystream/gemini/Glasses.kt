@@ -265,6 +265,7 @@ object Glasses {
                 ss.launch {
                     d.state.collect { st ->
                         say("Display: $st")
+                        if (display !== d) return@collect // an old, detached display
                         displayUp.value = st == DisplayState.STARTED
                         if (st == DisplayState.STARTED) {
                             if (!busy) mark(Link.READY)
