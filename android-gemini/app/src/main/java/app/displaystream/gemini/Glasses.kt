@@ -258,7 +258,7 @@ object Glasses {
                             val r = restore
                             restore = null
                             val pend = answerPending
-                            if (pend != null && !answerShown) answer(pend) else if (c != null) show(c) else if (r != null) answer(r) else home()
+                            if (pend != null && !answerShown) answer(pend) else if (c != null) show(content = c) else if (r != null) answer(r) else home()
                         }
                     }
                 }
@@ -280,7 +280,7 @@ object Glasses {
      * Puts a screen on the lens. Sends go one at a time and a screen that has already been replaced is skipped,
      * so a slow "THINKING…" can never land on top of the answer.
      */
-    private fun show(content: com.meta.wearable.dat.display.views.ContentScope.() -> Unit, isAnswer: Boolean = false) {
+    private fun show(isAnswer: Boolean = false, content: com.meta.wearable.dat.display.views.ContentScope.() -> Unit) {
         current = content
         val v = ++screenVersion
         scope.launch {
@@ -301,7 +301,7 @@ object Glasses {
     private fun reshow(afterMs: Long) {
         val c = current ?: return
         val v = screenVersion
-        scope.launch { delay(afterMs); if (v == screenVersion && current === c) show(c) }
+        scope.launch { delay(afterMs); if (v == screenVersion && current === c) show(content = c) }
     }
 
     private fun home(note: String? = null) = show {
