@@ -118,6 +118,7 @@ object Glasses {
     }
 
     private var sessionJob: Job? = null
+    private var sessionScope: CoroutineScope? = null
     private var retryJob: Job? = null
     private var lastLaunch = 0L
     private var devicesWatched = false
@@ -164,7 +165,7 @@ object Glasses {
     /** Drops everything tied to the current session so the next connect() starts from a clean slate. */
     private fun cleanup() {
         sessionJob?.cancel(); sessionJob = null
-        session = null; display = null; current = null; busy = false; standaloneOk = null
+        session = null; display = null; current = null; busy = false; standaloneOk = null; sessionScope = null
         displayUp.value = false
         mark(Link.OFF)
     }
@@ -198,6 +199,7 @@ object Glasses {
                 val job = SupervisorJob()
                 sessionJob = job
                 val ss = CoroutineScope(job + Dispatchers.Main)
+                sessionScope = ss
                 ss.launch {
                     s.errors.collect {
                         say("Session error: ${it.description}")
@@ -242,6 +244,18 @@ object Glasses {
         restore = null; speechDoneAt = 0L
         tts?.stop()
         cleanup()
+    }
+
+    private fun detachDisplay(s: DeviceSession) {
+        if (display == null) return
+        try { s.removeDisplay() } catch (e: Exception) { say("removeDisplay: ${e.message}") }
+        display = null
+        displayUp.value = false
+    }
+
+    private fun reattachDisplay(s: DeviceSession) {
+        val ss = sessionScope ?: return
+        if (session === s && display == null) attachDisplay(s, ss)
     }
 
     private fun attachDisplay(s: DeviceSession, ss: CoroutineScope) {
@@ -401,9 +415,13 @@ object Glasses {
      */
     private suspend fun ensure(p: Permission) {
         var status: PermissionStatus? = null
-        Wearables.checkPermissionStatus(p).fold(
-            onSuccess = { status = it },
-            onFailure = { e, _ -> say("Permission check (${p.name}): ${e.description}") })
+        val checked = withTimeoutOrNull(4000) {
+            Wearables.checkPermissionStatus(p).fold(
+                onSuccess = { status = it },
+                onFailure = { e, _ -> say("Permission check (${p.name}): ${e.description}") })
+            true
+        }
+        if (checked == null) { say("Permission check (${p.name}) timed out, trying anyway"); return }
         if (status == PermissionStatus.Granted) return
         say("${p.name} permission: ${status ?: "unknown"}")
         val ask = requestPermission
@@ -426,9 +444,17 @@ object Glasses {
         if (voice) ensure(Permission.MICROPHONE)
         if (skipPhoto) return streamCapture(s, voice, skipPhoto = true)
         val wav = if (voice) streamCapture(s, voice = true, skipPhoto = true).wav else null
+        // Meta's known-issues page: "Do not combine capture with display capabilities." So take the lens away
+        // while the photo is taken and transferred, then put it back; the answer is shown once it's back.
         if (voice) status("TAKING PHOTO…")
-        val photo = standalonePhoto(s) ?: streamCapture(s, voice = false, skipPhoto = false).photo
-        return Capture(photo, wav)
+        detachDisplay(s)
+        try {
+            val photo = withTimeoutOrNull(25_000) { standalonePhoto(s) ?: streamCapture(s, voice = false, skipPhoto = false).photo }
+                ?: error("photo took too long")
+            return Capture(photo, wav)
+        } finally {
+            reattachDisplay(s)
+        }
     }
 
     /** null = not tried yet, false = didn't work on these glasses (skip until reconnect). */
