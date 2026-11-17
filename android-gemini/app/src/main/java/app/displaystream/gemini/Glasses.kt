@@ -11,9 +11,6 @@ import com.meta.wearable.dat.camera.addCamera
 import com.meta.wearable.dat.camera.types.AudioCodec
 import com.meta.wearable.dat.camera.types.AudioSampleRate
 import com.meta.wearable.dat.camera.types.PhotoData
-import com.meta.wearable.dat.camera.types.PhotoQuality
-import com.meta.wearable.dat.camera.types.PhotoResolution
-import com.meta.wearable.dat.camera.types.PhotoState
 import com.meta.wearable.dat.camera.types.StreamConfiguration
 import com.meta.wearable.dat.camera.types.StreamState
 import com.meta.wearable.dat.camera.types.VideoQuality
@@ -437,13 +434,13 @@ object Glasses {
                     result.complete(withContext(Dispatchers.Default) { decodeImage(data) })
                 }
             }
-            val ready = withTimeoutOrNull(5000) { photo.state.first { it == PhotoState.STARTED } }
+            val ready = withTimeoutOrNull(5000) { photo.state.first { it.toString() == "STARTED" } }
             if (ready == null) {
                 say("Photo (new method): not ready after 5 s, using the old method")
                 standaloneOk = false
                 return null
             }
-            photo.capturePhoto(resolution = PhotoResolution.MEDIUM, quality = PhotoQuality.MEDIUM)
+            photo.capturePhoto() // defaults: medium size and quality
             val b = withTimeoutOrNull(12_000) { result.await() }
             if (b == null) {
                 say("Photo (new method) failed, using the old method")
