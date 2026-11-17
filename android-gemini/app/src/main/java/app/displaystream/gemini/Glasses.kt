@@ -134,7 +134,7 @@ object Glasses {
                         scope.launch {
                             Wearables.devicesMetadata[id]?.collect { d ->
                                 val line = "${d.linkState}" + (if (d.isDisplayCapable()) "" else ", no display") +
-                                    ", ${d.compatibility}"
+                                    ", ${d.compatibility}, battery ${d.batteryLevel}%, heat ${d.thermalLevel}"
                                 if (links[id] != line) { links[id] = line; say("Glasses: $line") }
                             }
                         }
@@ -435,22 +435,29 @@ object Glasses {
                 val wav2 = if (voice) synchronized(pcm) { wavOf(pcm.toByteArray()) } else null
                 return Capture(null, wav2)
             }
-            val out = CompletableDeferred<Bitmap>()
-            stream.capturePhoto().fold(
-                onSuccess = { p ->
-                    val b = when (p) {
-                        is PhotoData.Bitmap -> p.bitmap
-                        is PhotoData.HEIC -> {
-                            val buf: ByteBuffer = p.data.duplicate().apply { rewind() }
-                            val bytes = ByteArray(buf.remaining()); buf.get(bytes)
-                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            // Photo transfer from the glasses sometimes fails on a weak link: try up to 3 times.
+            var photo: Bitmap? = null
+            var lastErr = ""
+            for (attempt in 1..3) {
+                stream.capturePhoto().fold(
+                    onSuccess = { p ->
+                        photo = when (p) {
+                            is PhotoData.Bitmap -> p.bitmap
+                            is PhotoData.HEIC -> {
+                                val buf: ByteBuffer = p.data.duplicate().apply { rewind() }
+                                val bytes = ByteArray(buf.remaining()); buf.get(bytes)
+                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            }
                         }
-                    }
-                    if (b != null) out.complete(b) else out.completeExceptionally(IllegalStateException("Could not decode photo"))
-                },
-                onFailure = { e, _ -> out.completeExceptionally(IllegalStateException("capture: ${e.description}")) },
-            )
-            val photo = out.await()
+                        if (photo == null) lastErr = "could not decode photo"
+                    },
+                    onFailure = { e, _ -> lastErr = e.description },
+                )
+                if (photo != null) break
+                say("Photo attempt $attempt failed: $lastErr")
+                if (attempt < 3) delay(1200)
+            }
+            if (photo == null) error("capture: $lastErr")
             val wav = if (voice) synchronized(pcm) { wavOf(pcm.toByteArray()) } else null
             return Capture(photo, wav)
         } finally {
