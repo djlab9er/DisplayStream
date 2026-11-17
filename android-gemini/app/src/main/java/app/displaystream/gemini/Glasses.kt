@@ -468,7 +468,16 @@ object Glasses {
             var photo: Bitmap? = null
             var lastErr = ""
             for (attempt in 1..3) {
-                stream.capturePhoto().fold(
+                // The first photo request often hangs ~11 s and then fails while a second one works in ~2 s,
+                // so give each attempt a short time limit and move on.
+                val t0 = System.currentTimeMillis()
+                val res = withTimeoutOrNull(if (attempt == 1) 4500L else 9000L) { stream.capturePhoto() }
+                if (res == null) {
+                    lastErr = "no photo after ${(System.currentTimeMillis() - t0) / 1000.0}s"
+                    say("Photo attempt $attempt timed out")
+                    continue
+                }
+                res.fold(
                     onSuccess = { p ->
                         photo = when (p) {
                             is PhotoData.Bitmap -> p.bitmap
