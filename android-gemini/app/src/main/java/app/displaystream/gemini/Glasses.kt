@@ -25,6 +25,7 @@ import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.core.types.RegistrationState
 import com.meta.wearable.dat.display.Display
 import com.meta.wearable.dat.display.addDisplay
+import com.meta.wearable.dat.display.removeDisplay
 import com.meta.wearable.dat.display.types.DisplayState
 import com.meta.wearable.dat.display.views.ActionRole
 import com.meta.wearable.dat.display.views.ButtonStyle
@@ -234,6 +235,7 @@ object Glasses {
 
     fun disconnect() {
         retryJob?.cancel()
+        try { session?.removeDisplay() } catch (e: Exception) {}
         try { session?.stop() } catch (e: Exception) {}
         restore = null; speechDoneAt = 0L
         tts?.stop()
@@ -440,6 +442,12 @@ object Glasses {
             }
             stream.start().fold(onSuccess = {}, onFailure = { e, _ -> error("stream start: ${e.description}") })
             withTimeout(15_000) { stream.state.first { it == StreamState.STREAMING } }
+            // Wait for the camera to actually deliver a frame before asking for a photo; asking earlier tends to fail.
+            if (!skipPhoto) {
+                val t0 = System.currentTimeMillis()
+                val got = withTimeoutOrNull(4000) { stream.videoStream.first { !it.isCodecConfig } }
+                say(if (got != null) "Camera ready (${System.currentTimeMillis() - t0} ms)" else "Camera: no frame yet, trying anyway")
+            }
             if (voice) {
                 val t0 = System.currentTimeMillis()
                 while (true) {
