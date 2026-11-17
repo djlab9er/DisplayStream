@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -83,7 +84,8 @@ object Glasses {
         private set
     var onStatus: ((Link) -> Unit)? = null
     private fun mark(l: Link) { if (link != l) { link = l; onStatus?.invoke(l) } }
-    var requestPermission: suspend (Permission) -> PermissionStatus = { PermissionStatus.Denied }
+    /** Shows Meta's camera/microphone prompt. Set only while the phone screen is open, since the prompt needs it. */
+    var requestPermission: (suspend (Permission) -> PermissionStatus)? = null
 
     private fun say(s: String) { log(s) }
 
@@ -351,12 +353,25 @@ object Glasses {
 
     private class Capture(val photo: Bitmap?, val wav: ByteArray?)
 
+    /**
+     * Checks Meta's camera/microphone permission. If it isn't granted and the phone screen is open, shows the prompt
+     * (with a time limit). Otherwise carries on and lets the glasses decide, so a stale "not granted" answer never blocks.
+     */
     private suspend fun ensure(p: Permission) {
-        var granted = false
+        var status: PermissionStatus? = null
         Wearables.checkPermissionStatus(p).fold(
-            onSuccess = { granted = it == PermissionStatus.Granted },
-            onFailure = { e, _ -> say("Permission check: ${e.description}") })
-        if (!granted && requestPermission(p) != PermissionStatus.Granted) error("${p.name} permission denied")
+            onSuccess = { status = it },
+            onFailure = { e, _ -> say("Permission check (${p.name}): ${e.description}") })
+        if (status == PermissionStatus.Granted) return
+        say("${p.name} permission: ${status ?: "unknown"}")
+        val ask = requestPermission
+        if (ask == null) {
+            say("Phone screen closed, trying ${p.name} anyway. If it fails, open Gemini Glasses on the phone and try again.")
+            return
+        }
+        val r = withTimeoutOrNull(60_000) { ask(p) }
+        say("${p.name} permission answer: ${r ?: "no answer"}")
+        if (r == PermissionStatus.Denied) error("${p.name} permission denied in Meta AI")
     }
 
     private suspend fun capture(s: DeviceSession, voice: Boolean, skipPhoto: Boolean = false): Capture {
