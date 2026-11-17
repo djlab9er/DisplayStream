@@ -39,6 +39,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -416,12 +417,15 @@ object Glasses {
      */
     private suspend fun ensure(p: Permission) {
         var status: PermissionStatus? = null
-        val checked = withTimeoutOrNull(4000) {
+        // Run the check off the main thread and stop waiting after 4 s: the first check after connecting
+        // can block for a long time, which froze the app and made the glasses ignore taps.
+        val job = scope.async(Dispatchers.IO) {
             Wearables.checkPermissionStatus(p).fold(
                 onSuccess = { status = it },
                 onFailure = { e, _ -> say("Permission check (${p.name}): ${e.description}") })
             true
         }
+        val checked = withTimeoutOrNull(4000) { job.await() }
         if (checked == null) { say("Permission check (${p.name}) timed out, trying anyway"); return }
         if (status == PermissionStatus.Granted) return
         say("${p.name} permission: ${status ?: "unknown"}")
