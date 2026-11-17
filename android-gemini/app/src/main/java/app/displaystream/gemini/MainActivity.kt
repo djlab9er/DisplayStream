@@ -323,7 +323,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        Glasses.onStatus = { render(it) }
+        Glasses.onStatus = { l -> runOnUiThread { render(l) } }
         // Meta's permission prompt must be launched from a live, visible screen.
         Glasses.requestPermission = { perm ->
             suspendCancellableCoroutine { c ->
@@ -362,7 +362,7 @@ class MainActivity : AppCompatActivity() {
     private fun render(l: Link) {
         val model = getSharedPreferences("gg", Context.MODE_PRIVATE).getString("model", "").orEmpty().ifBlank { Gemini.DEFAULT_MODEL }
         val (title, sub, color) = when (l) {
-            Link.OFF -> Triple("Not connected", "Open the Gemini web app on your glasses to start.", GREY)
+            Link.OFF -> Triple("Not connected", "Tap Connect, or open the Gemini web app on your glasses.", GREY)
             Link.CONNECTING -> Triple("Connecting…", "Reaching your glasses through the Meta AI app.", AMBER)
             Link.READY -> Triple("Ready on your glasses", "Using $model", GREEN)
             Link.BUSY -> Triple("Working…", "Using $model", CYAN)
@@ -370,8 +370,7 @@ class MainActivity : AppCompatActivity() {
         statusTitle.text = title
         statusSub.text = sub
         (statusDot.background as? GradientDrawable)?.setColor(color)
-        mainButton.text = "Disconnect"
-        mainButton.visibility = if (l == Link.OFF) View.GONE else View.VISIBLE
+        mainButton.text = if (l == Link.OFF) "Connect glasses" else "Disconnect"
         testButton.visibility = if (l == Link.READY) View.VISIBLE else View.GONE
     }
 }

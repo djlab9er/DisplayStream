@@ -354,9 +354,9 @@ object Glasses {
                 if (lastJpeg != null) {
                     button("Follow-up", style = ButtonStyle.PRIMARY, iconName = IconName.CHECKMARK,
                         onClick = { ask(Mode.SPEAK, followUp = true) }, actionRole = ActionRole.PRIMARY)
-                    button("Home", style = ButtonStyle.SECONDARY, onClick = { say("Tap received: home"); home() })
+                    button("Home", style = ButtonStyle.SECONDARY, onClick = { say("Tap received: home"); mainHandler.post { home() } })
                 } else {
-                    button("Home", style = ButtonStyle.PRIMARY, onClick = { say("Tap received: home"); home() }, actionRole = ActionRole.PRIMARY)
+                    button("Home", style = ButtonStyle.PRIMARY, onClick = { say("Tap received: home"); mainHandler.post { home() } }, actionRole = ActionRole.PRIMARY)
                 }
             }
         }
@@ -364,7 +364,17 @@ object Glasses {
     }
 
 
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /**
+     * Glasses taps arrive on a background thread. Everything here (and the phone screen it updates) must run on
+     * the main thread: touching the phone screen from the tap thread crashed the request and left the app "busy".
+     */
     fun ask(mode: Mode = Mode.LOOK, followUp: Boolean = false) {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            mainHandler.post { ask(mode, followUp) }
+            return
+        }
         val voice = mode == Mode.SPEAK
         say("Tap received: ${if (followUp) "Follow-up" else mode.name.lowercase()}")
         if (busy) { say("Ignored: still working on the last request"); return }
