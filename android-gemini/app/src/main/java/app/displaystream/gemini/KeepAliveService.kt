@@ -32,9 +32,7 @@ class KeepAliveService : Service() {
         if (code != listenerCode) {
             listener?.stop(); listener = null; listenerCode = code
             if (code.isNotEmpty()) {
-                listener = LaunchListener(code) {
-                    if (!Glasses.active) Glasses.connect()
-                }.also { it.start() }
+                listener = LaunchListener(code) { Glasses.launchFromGlasses() }.also { it.start() }
             }
         }
         return START_STICKY

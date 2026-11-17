@@ -18,6 +18,8 @@ import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSession
 import com.meta.wearable.dat.core.session.DeviceSessionState
+import com.meta.wearable.dat.core.types.DeviceIdentifier
+import com.meta.wearable.dat.core.types.LinkState
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.core.types.RegistrationState
@@ -111,6 +113,48 @@ object Glasses {
     }
 
     private var sessionJob: Job? = null
+    private var retryJob: Job? = null
+    private var lastLaunch = 0L
+    private var devicesWatched = false
+    /** Last known link state per pair of glasses, as reported by the Meta AI app. */
+    private val links = mutableMapOf<DeviceIdentifier, String>()
+
+    /** Logs whenever the Meta AI app reports a change in the glasses' link, so "no eligible device" can be explained. */
+    fun watchDevices() {
+        if (devicesWatched) return
+        devicesWatched = true
+        val jobs = mutableMapOf<DeviceIdentifier, Job>()
+        scope.launch {
+            Wearables.devices.collect { ids ->
+                (jobs.keys - ids).forEach { id -> jobs.remove(id)?.cancel(); links.remove(id); say("Glasses: gone from Meta AI") }
+                ids.forEach { id ->
+                    jobs.getOrPut(id) {
+                        scope.launch {
+                            Wearables.devicesMetadata[id]?.collect { d ->
+                                val line = "${d.linkState}" + (if (d.isDisplayCapable()) "" else ", no display") +
+                                    ", ${d.compatibility}"
+                                if (links[id] != line) { links[id] = line; say("Glasses: $line") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun glassesLinked(): Boolean = links.values.any { it.startsWith(LinkState.CONNECTED.toString()) }
+
+    /**
+     * Called when the Gemini web app on the glasses asks to start. Both relays deliver the same request,
+     * and the page retries, so ignore repeats while a connection is already being made.
+     */
+    fun launchFromGlasses() {
+        val now = System.currentTimeMillis()
+        if (session != null || retryJob?.isActive == true || now - lastLaunch < 8000) return
+        lastLaunch = now
+        say("Glasses launcher: start requested")
+        connect()
+    }
 
     /** Drops everything tied to the current session so the next connect() starts from a clean slate. */
     private fun cleanup() {
@@ -139,6 +183,7 @@ object Glasses {
     /** Opens a session and shows the home screen on the lens. Retries a few times if the glasses aren't ready. */
     fun connect(attempt: Int = 0) {
         if (session != null) { say("Already connecting/connected"); return }
+        if (attempt == 0) retryJob?.cancel()
         mark(Link.CONNECTING)
         Wearables.createSession(AutoDeviceSelector(filter = { it.isDisplayCapable() })).fold(
             onSuccess = { s ->
@@ -166,14 +211,25 @@ object Glasses {
                 s.start()
             },
             onFailure = { e, _ ->
-                say("Could not create session: ${e.description}")
-                if (attempt < 3) scope.launch { delay(4000); if (session == null) connect(attempt + 1) }
-                else mark(Link.OFF)
+                say("Could not create session: ${e.description}" + if (attempt == 0) (if (glassesLinked()) "" else " (glasses not linked yet)") else "")
+                // One retry chain at a time; wait for the glasses to come back if they aren't linked.
+                if (attempt < 5) {
+                    retryJob?.cancel()
+                    retryJob = scope.launch {
+                        var waited = 0
+                        do { delay(1000); waited++ } while (!glassesLinked() && waited < 6)
+                        if (session == null) connect(attempt + 1)
+                    }
+                } else {
+                    say("Gave up. Make sure the glasses show as connected in the Meta AI app, then tap Connect.")
+                    mark(Link.OFF)
+                }
             },
         )
     }
 
     fun disconnect() {
+        retryJob?.cancel()
         try { session?.stop() } catch (e: Exception) {}
         restore = null; speechDoneAt = 0L
         tts?.stop()

@@ -11,6 +11,7 @@ class App : Application() {
         val prefs = getSharedPreferences("gg", Context.MODE_PRIVATE)
         Glasses.log = { AppLog.add(it) }
         Glasses.initTts(this)
+        Glasses.watchDevices()
         Glasses.apiKey = { prefs.getString("key", "") ?: "" }
         Glasses.model = { prefs.getString("model", "") ?: "" }
         Glasses.speechRate = { prefs.getString("rate", "")?.toFloatOrNull()?.coerceIn(0.4f, 2f) ?: 0.8f }
