@@ -8,12 +8,10 @@ class GeminiTileService : TileService() {
     override fun onStartListening() { refresh() }
 
     override fun onClick() {
+        // Starting from the phone no longer works on the glasses (taps aren't delivered), so the tile only stops.
         if (Glasses.active) {
             Glasses.disconnect()
             KeepAliveService.stop(this)
-        } else {
-            KeepAliveService.start(this)
-            Glasses.connect()
         }
         refresh()
     }
@@ -22,7 +20,7 @@ class GeminiTileService : TileService() {
         val t = qsTile ?: return
         t.state = if (Glasses.active) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         t.label = "Gemini Glasses"
-        t.subtitle = if (Glasses.active) "On · tap to stop" else "Tap to start"
+        t.subtitle = if (Glasses.active) "On · tap to stop" else "Start from glasses"
         t.updateTile()
     }
 }
