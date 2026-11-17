@@ -25,6 +25,7 @@ import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.core.types.RegistrationState
 import com.meta.wearable.dat.display.Display
 import com.meta.wearable.dat.display.addDisplay
+import com.meta.wearable.dat.display.removeDisplay
 import com.meta.wearable.dat.display.types.DisplayState
 import com.meta.wearable.dat.display.views.ActionRole
 import com.meta.wearable.dat.display.views.ButtonStyle
