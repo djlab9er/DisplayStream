@@ -302,9 +302,9 @@ object Glasses {
                 if (lastJpeg != null) {
                     button("Follow-up", style = ButtonStyle.PRIMARY, iconName = IconName.CHECKMARK,
                         onClick = { ask(Mode.SPEAK, followUp = true) }, actionRole = ActionRole.PRIMARY)
-                    button("Home", style = ButtonStyle.SECONDARY, onClick = { home() })
+                    button("Home", style = ButtonStyle.SECONDARY, onClick = { say("Tap received: home"); home() })
                 } else {
-                    button("Home", style = ButtonStyle.PRIMARY, onClick = { home() }, actionRole = ActionRole.PRIMARY)
+                    button("Home", style = ButtonStyle.PRIMARY, onClick = { say("Tap received: home"); home() }, actionRole = ActionRole.PRIMARY)
                 }
             }
         }
@@ -312,7 +312,8 @@ object Glasses {
 
     fun ask(mode: Mode = Mode.LOOK, followUp: Boolean = false) {
         val voice = mode == Mode.SPEAK
-        if (busy) return
+        say("Tap received: ${if (followUp) "Follow-up" else mode.name.lowercase()}")
+        if (busy) { say("Ignored: still working on the last request"); return }
         val s = session ?: run { say("Not connected"); return }
         if (display == null) { say("Display not ready"); return }
         if (apiKey().isBlank()) { home("Add your Gemini key in the phone app."); return }
