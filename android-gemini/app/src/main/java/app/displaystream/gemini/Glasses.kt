@@ -484,8 +484,12 @@ object Glasses {
         if (voice) status("TAKING PHOTO…")
         detachDisplay(s)
         try {
-            val photo = withTimeoutOrNull(25_000) { standalonePhoto(s) ?: streamCapture(s, voice = false, skipPhoto = false).photo }
-                ?: error("photo took too long")
+            // Logs from outdoors: every time the old in-stream photo (a video stream) was used as a fallback, the
+            // glasses dropped their link. So retry the standalone photo once instead, and never fall back to the stream.
+            val photo = withTimeoutOrNull(30_000) {
+                standalonePhoto(s) ?: run { say("Trying the photo once more"); standalonePhoto(s) }
+            }
+                ?: error("photo didn't come through, try again")
             return Capture(photo, wav)
         } finally {
             // The glasses closed their link once right as the photo finished and audio started.
@@ -499,7 +503,6 @@ object Glasses {
     private var standaloneOk: Boolean? = null
 
     private suspend fun standalonePhoto(s: DeviceSession): Bitmap? {
-        if (standaloneOk == false) return null
         val t0 = System.currentTimeMillis()
         val camera = s.addCamera(StreamConfiguration(videoQuality = VideoQuality.LOW, frameRate = 7, compressVideo = true)).fold(
             onSuccess = { it },
