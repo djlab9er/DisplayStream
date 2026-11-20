@@ -25,6 +25,22 @@ object AppLog {
         }
     }
 
+    /** Keeps the log across the app restarting itself. */
+    fun save(c: android.content.Context) {
+        c.getSharedPreferences("gg", android.content.Context.MODE_PRIVATE).edit().putString("log", text()).commit()
+    }
+
+    fun restore(c: android.content.Context) {
+        val p = c.getSharedPreferences("gg", android.content.Context.MODE_PRIVATE)
+        val old = p.getString("log", null) ?: return
+        p.edit().remove("log").apply()
+        main.post {
+            old.split("\n").filter { it.isNotBlank() }.asReversed().forEach { lines.addFirst(it) }
+            while (lines.size > MAX) lines.removeFirst()
+            onChange?.invoke()
+        }
+    }
+
     fun clear() { lines.clear(); onChange?.invoke() }
 
     fun text(): String = lines.joinToString("\n")

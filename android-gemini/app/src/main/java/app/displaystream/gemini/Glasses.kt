@@ -93,7 +93,10 @@ object Glasses {
 
     private fun say(s: String) { log(s) }
 
+    private var appCtx: Context? = null
+
     fun initTts(c: Context) {
+        appCtx = c.applicationContext
         if (tts != null) return
         tts = TextToSpeech(c.applicationContext) { ok ->
             if (ok == TextToSpeech.SUCCESS) {
@@ -147,6 +150,21 @@ object Glasses {
                 }
             }
         }
+    }
+
+    /**
+     * After the glasses drop out, Meta's toolkit in this app sometimes never notices them come back (a force-stop fixed it).
+     * If the background service is running, restart the app's process the same way: Android brings the service back
+     * by itself a few seconds later, with a fresh link. The log is saved first so it survives.
+     */
+    private fun restartLink() {
+        val c = appCtx ?: return
+        if (KeepAliveService.launcherCode(c).isEmpty()) return
+        say("Restarting the app's link to the glasses. Open Gemini on the glasses again in about 10 seconds.")
+        mainHandler.postDelayed({
+            AppLog.save(c)
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }, 1500)
     }
 
     private fun glassesLinked(): Boolean = links.values.any { it.startsWith(LinkState.CONNECTED.toString()) }
@@ -233,6 +251,7 @@ object Glasses {
                 } else {
                     say("Gave up. Make sure the glasses show as connected in the Meta AI app, then tap Connect.")
                     mark(Link.OFF)
+                    restartLink()
                 }
             },
         )
@@ -389,7 +408,7 @@ object Glasses {
             try {
                 status(if (voice && followUp) "FOLLOW-UP…" else if (voice) "LISTENING…" else if (mode == Mode.TRANSLATE) "READING…" else "LOOK…", if (voice) "Ask your question" else null)
                 val reuse = if (followUp) lastJpeg else null
-                val cap = capture(s, voice, skipPhoto = reuse != null)
+                val cap = capture(s, voice, skipPhoto = reuse != null, translate = mode == Mode.TRANSLATE)
                 status("THINKING…")
                 val photo = cap.photo
                 val jpeg = reuse ?: withContext(Dispatchers.Default) {
@@ -454,9 +473,10 @@ object Glasses {
      * (no video stream running), after any voice recording has finished. If that feature doesn't work on these
      * glasses, it falls back to the older in-stream photo and stops trying the standalone one until reconnect.
      */
-    private suspend fun capture(s: DeviceSession, voice: Boolean, skipPhoto: Boolean = false): Capture {
+    private suspend fun capture(s: DeviceSession, voice: Boolean, skipPhoto: Boolean = false, translate: Boolean = false): Capture {
         ensure(Permission.CAMERA)
         if (voice) ensure(Permission.MICROPHONE)
+        smallPhoto = !translate
         if (skipPhoto) return streamCapture(s, voice, skipPhoto = true)
         val wav = if (voice) streamCapture(s, voice = true, skipPhoto = true).wav else null
         // Meta's known-issues page: "Do not combine capture with display capabilities." So take the lens away
@@ -502,7 +522,9 @@ object Glasses {
                 standaloneOk = false
                 return null
             }
-            photo.capturePhoto() // defaults: medium size and quality
+            // A smaller photo is a shorter Bluetooth transfer, which matters when the link is weak (outdoors).
+            // Transcription needs detail, so Translate keeps the default size.
+            if (!(smallPhoto && capturePhotoLow(photo))) photo.capturePhoto() // defaults: medium size and quality
             val b = withTimeoutOrNull(12_000) { result.await() }
             if (b == null) {
                 say("Photo (new method) failed, using the old method")
@@ -520,6 +542,27 @@ object Glasses {
             jobs.forEach { it.cancel() }
             camera.stop()
         }
+    }
+
+    /** Set per ask: Look/Speak use small photos, Translate the default. */
+    private var smallPhoto = false
+
+    /**
+     * Asks for a LOW-resolution photo. The setting's type isn't reachable at compile time here, so it's looked up at run
+     * time; if anything doesn't match, returns false and the caller takes a default photo.
+     */
+    private fun capturePhotoLow(photo: Any): Boolean = try {
+        val m = photo.javaClass.methods.firstOrNull { m ->
+            m.name.startsWith("capturePhoto") && m.parameterTypes.size == 2 && m.parameterTypes.all { it.isEnum }
+        }
+        val args = m?.parameterTypes?.map { t -> t.enumConstants?.firstOrNull { (it as Enum<*>).name == "LOW" } }
+        if (m == null || args == null || args.any { it == null }) {
+            say("Small photo setting not found, using default size"); false
+        } else {
+            m.invoke(photo, *args.toTypedArray()); say("Photo size: small"); true
+        }
+    } catch (e: Exception) {
+        say("Small photo failed (${e.javaClass.simpleName}), using default size"); false
     }
 
     private fun decodeImage(data: Any): Bitmap? {
@@ -568,7 +611,7 @@ object Glasses {
                         val rms = Math.sqrt(sum / (bytes.size / 2))
                         frames++
                         if (rms.toInt() > maxRms) maxRms = rms.toInt()
-                        if (rms > 600) { spoke = true; lastLoud = System.currentTimeMillis(); heard.value = lastLoud }
+                        if (rms > SPEECH_LEVEL) { spoke = true; lastLoud = System.currentTimeMillis(); heard.value = lastLoud }
                     }
                 }
             }
@@ -586,7 +629,7 @@ object Glasses {
                     delay(100)
                     val now = System.currentTimeMillis()
                     if (spoke && now - lastLoud > 1300) break
-                    if (!spoke && now - t0 > 7000) error(if (frames == 0) "No audio from glasses mic (turn off Hey Meta in Meta AI, close other mic apps)" else "I didn't hear anything (loudest $maxRms, need 600)")
+                    if (!spoke && now - t0 > 7000) error(if (frames == 0) "No audio from glasses mic (turn off Hey Meta in Meta AI, close other mic apps)" else "I didn't hear anything (loudest $maxRms, need $SPEECH_LEVEL)")
                     if (now - t0 > 15000) break
                 }
             } else {
@@ -635,6 +678,9 @@ object Glasses {
             camera.stop()
         }
     }
+
+    /** Loudness that counts as speech. 600 was too strict outdoors (a real question peaked at 292). */
+    private const val SPEECH_LEVEL = 250
 
     private fun wavOf(pcm: ByteArray, rate: Int = 16000): ByteArray {
         val h = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
