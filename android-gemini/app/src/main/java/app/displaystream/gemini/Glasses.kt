@@ -104,7 +104,11 @@ object Glasses {
         if (tts != null) return
         tts = TextToSpeech(c.applicationContext) { ok ->
             if (ok == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.getDefault()
+                // Use the voice picked in Android's text-to-speech settings (language and voice), not just the
+                // phone's language, so a UK or other voice chosen there is what plays in the glasses.
+                val t = tts
+                val v = t?.defaultVoice
+                if (t != null && v != null) { t.voice = v; say("Voice: ${v.name}") } else t?.language = Locale.getDefault()
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {}
                     override fun onDone(utteranceId: String?) { speechDoneAt = System.currentTimeMillis() }
