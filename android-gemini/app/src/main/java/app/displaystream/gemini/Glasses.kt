@@ -449,7 +449,7 @@ object Glasses {
         tts?.stop()
         scope.launch {
             try {
-                status(if (voice && followUp) "FOLLOW-UP…" else if (voice) "LISTENING…" else if (mode == Mode.TRANSLATE) "READING…" else "LOOK…", if (voice) "Ask your question" else null)
+                status(if (voice) "GET READY…" else if (mode == Mode.TRANSLATE) "READING…" else "LOOK…", if (voice) "Wait for the light, then speak" else null)
                 val reuse = if (followUp) lastJpeg else null
                 val cap = capture(s, voice, skipPhoto = reuse != null, translate = mode == Mode.TRANSLATE)
                 status("THINKING…")
@@ -646,6 +646,7 @@ object Glasses {
             var spoke = false
             var frames = 0
             var maxRms = 0
+            var liveAt = 0L
             if (voice) {
                 audioJob = scope.launch(Dispatchers.Default) {
                     stream.audioStream.collect { frame ->
@@ -658,6 +659,13 @@ object Glasses {
                         synchronized(pcm) { pcm.write(bytes) }
                         val rms = Math.sqrt(sum / (bytes.size / 2))
                         frames++
+                        // The glasses mic only goes live once the camera stream starts (the white light).
+                        // Tell the wearer when it's actually listening.
+                        if (frames == 1) {
+                            liveAt = System.currentTimeMillis()
+                            say("Mic live")
+                            mainHandler.post { status("LISTENING…", "Speak now") }
+                        }
                         if (rms.toInt() > maxRms) maxRms = rms.toInt()
                         if (rms > SPEECH_LEVEL) { spoke = true; lastLoud = System.currentTimeMillis(); heard.value = lastLoud }
                     }
@@ -676,9 +684,11 @@ object Glasses {
                 while (true) {
                     delay(100)
                     val now = System.currentTimeMillis()
+                    // Count the 7 seconds from when the mic actually went live, not from when we asked for it.
+                    val base = if (liveAt > 0) liveAt else t0
                     if (spoke && now - lastLoud > 1300) break
-                    if (!spoke && now - t0 > 7000) error(if (frames == 0) "No audio from glasses mic (turn off Hey Meta in Meta AI, close other mic apps)" else "I didn't hear anything (loudest $maxRms, need $SPEECH_LEVEL)")
-                    if (now - t0 > 15000) break
+                    if (!spoke && now - base > 7000) error(if (frames == 0) "No audio from glasses mic (turn off Hey Meta in Meta AI, close other mic apps)" else "I didn't hear anything (loudest $maxRms, need $SPEECH_LEVEL)")
+                    if (now - base > 15000) break
                 }
             } else {
                 delay(400)
