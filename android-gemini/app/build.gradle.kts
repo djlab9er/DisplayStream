@@ -37,7 +37,7 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.9.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-    implementation("com.meta.wearable:mwdat-core:1.0.1")
-    implementation("com.meta.wearable:mwdat-camera:1.0.1")
-    implementation("com.meta.wearable:mwdat-display:1.0.1")
+    implementation("com.meta.wearable:mwdat-core:1.1.0")
+    implementation("com.meta.wearable:mwdat-camera:1.1.0")
+    implementation("com.meta.wearable:mwdat-display:1.1.0")
 }
