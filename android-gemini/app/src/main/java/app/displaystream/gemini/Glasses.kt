@@ -560,7 +560,7 @@ object Glasses {
         }
         val args = m?.parameterTypes?.map { t -> t.enumConstants?.firstOrNull { (it as Enum<*>).name == "LOW" } }
         if (m == null || args == null || args.any { it == null }) {
-            say("Small photo setting not found, using default size"); false
+            false
         } else {
             m.invoke(photo, *args.toTypedArray()); say("Photo size: small"); true
         }

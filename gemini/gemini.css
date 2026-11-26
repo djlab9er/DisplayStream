@@ -7,3 +7,6 @@ h1 { font-size: 44px; letter-spacing: 4px; margin: 20px 0 12px; }
 .code { font-size: 64px; font-weight: 700; letter-spacing: 8px; margin: 8px 0 20px; font-family: ui-monospace, monospace; }
 button { font-size: 32px; padding: 18px 36px; border-radius: 16px; border: 3px solid #fff; background: #222; color: #fff; }
 button:focus { outline: 4px solid #6cf; background: #123; }
+
+button.small { font-size: 18px; padding: 6px 16px; margin-top: 10px; opacity: .8; }
+[hidden] { display: none !important; }
