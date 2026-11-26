@@ -23,6 +23,13 @@
   }
   function setStatus(t) { $('status').textContent = t; }
 
+  // The code is only needed once, to pair with the phone app. Show it on the first visit, when something
+  // goes wrong, or when asked; otherwise keep the screen clean.
+  var SEEN = 'pgem.seen';
+  var firstVisit = true;
+  try { firstVisit = !localStorage.getItem(SEEN); localStorage.setItem(SEEN, '1'); } catch (e) {}
+  function showCode(on) { $('pair').hidden = !on; $('show').hidden = !!on; }
+
   var code = loadCode();
   $('code').textContent = code;
   var peer = null, answered = false, timer = null, tries = 0, retry = null;
@@ -34,7 +41,7 @@
   }
   function noPhone(msg) {
     setStatus(msg);
-    $('pair').hidden = false;
+    showCode(true);
     close();
   }
   // The glasses' network can take a few seconds to come up right after an app opens, so a failed
@@ -48,6 +55,7 @@
       retry = setTimeout(function () { attempt(); }, 3000);
     } else {
       setStatus('No network (' + why + '). Tap Start Gemini to try again.');
+      showCode(true);
     }
   }
 
@@ -58,7 +66,7 @@
 
   function attempt() {
     close();
-    $('pair').hidden = false;
+    showCode(firstVisit);
     if (!tries) setStatus('Contacting your phone…');
     var done = false;
     var ctl = (typeof AbortController === 'function') ? new AbortController() : null;
@@ -102,6 +110,7 @@
   }
 
   $('go').addEventListener('click', start);
-  document.addEventListener('keydown', function (e) { if (e.key === 'Enter') start(); });
+  $('show').addEventListener('click', function () { showCode(true); $('go').focus(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Enter' && document.activeElement !== $('show')) start(); });
   start();
 })();
