@@ -29,6 +29,8 @@ import com.meta.wearable.dat.display.removeDisplay
 import com.meta.wearable.dat.display.types.DisplayState
 import com.meta.wearable.dat.display.views.ActionRole
 import com.meta.wearable.dat.display.views.ButtonStyle
+import com.meta.wearable.dat.display.views.CornerRadius
+import com.meta.wearable.dat.display.views.ImageSize
 import com.meta.wearable.dat.display.views.Direction
 import com.meta.wearable.dat.display.views.FlexBoxBackground
 import com.meta.wearable.dat.display.views.IconName
@@ -66,6 +68,8 @@ object Glasses {
     private var lastAnswer: Answer? = null
     /** The last photo as sent to Gemini (small JPEG), kept for follow-up questions. */
     private var lastJpeg: ByteArray? = null
+    /** Photos found for the latest answer, when the person asked to see pictures. */
+    private var lastPictures: List<Picture> = emptyList()
     private var lastMode = Mode.LOOK
     /** When the spoken answer finished; 0 when not relevant. Used to recover if the glasses close the screen then. */
     private var speechDoneAt = 0L
@@ -370,12 +374,18 @@ object Glasses {
             text(a.headline, style = TextStyle.HEADING)
             a.bullets.forEach { text(it, style = TextStyle.BODY) }
             buttonGroup {
-                if (lastJpeg != null) {
+                val home = { say("Tap received: home"); mainHandler.post { home() }; Unit }
+                if (lastPictures.isNotEmpty()) {
+                    button("Pictures (${lastPictures.size})", style = ButtonStyle.PRIMARY, iconName = IconName.CHECKMARK,
+                        onClick = { say("Tap received: pictures"); mainHandler.post { gallery(0) } }, actionRole = ActionRole.PRIMARY)
+                    if (lastJpeg != null) button("Follow-up", style = ButtonStyle.SECONDARY, onClick = { ask(Mode.SPEAK, followUp = true) })
+                    button("Home", style = ButtonStyle.SECONDARY, onClick = home)
+                } else if (lastJpeg != null) {
                     button("Follow-up", style = ButtonStyle.PRIMARY, iconName = IconName.CHECKMARK,
                         onClick = { ask(Mode.SPEAK, followUp = true) }, actionRole = ActionRole.PRIMARY)
-                    button("Home", style = ButtonStyle.SECONDARY, onClick = { say("Tap received: home"); mainHandler.post { home() } })
+                    button("Home", style = ButtonStyle.SECONDARY, onClick = home)
                 } else {
-                    button("Home", style = ButtonStyle.PRIMARY, onClick = { say("Tap received: home"); mainHandler.post { home() } }, actionRole = ActionRole.PRIMARY)
+                    button("Home", style = ButtonStyle.PRIMARY, onClick = home, actionRole = ActionRole.PRIMARY)
                 }
             }
         }
@@ -384,6 +394,38 @@ object Glasses {
 
 
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** Fetches the photos Gemini suggested, then adds a Pictures button to the answer if it's still on screen. */
+    private fun loadPictures(a: Answer) {
+        scope.launch {
+            val pics = Pictures.find(a.pictures) { say(it) }
+            say("Pictures found: ${pics.size} of ${a.pictures.size}")
+            if (pics.isEmpty() || lastAnswer !== a) return@launch
+            lastPictures = pics
+            if (answerPending === a || answerShown) answer(a)
+        }
+    }
+
+    /** One photo per screen: photo, name, short description, Next / Back. */
+    private fun gallery(i: Int) {
+        val pics = lastPictures
+        if (pics.isEmpty()) return
+        val n = pics.size
+        val p = pics[((i % n) + n) % n]
+        show {
+            flexBox(direction = Direction.COLUMN, gap = 8, padding = 16, background = FlexBoxBackground.CARD) {
+                image(bitmap = p.bitmap, sizePreset = ImageSize.FILL, cornerRadius = CornerRadius.MEDIUM)
+                text("${p.label}  ${(i % n) + 1}/$n", style = TextStyle.BODY)
+                if (p.caption.isNotEmpty()) text(p.caption, style = TextStyle.META, color = TextColor.SECONDARY)
+                buttonGroup {
+                    button("Next", style = ButtonStyle.PRIMARY, iconName = IconName.CHECKMARK,
+                        onClick = { mainHandler.post { gallery(i + 1) } }, actionRole = ActionRole.PRIMARY)
+                    button("Back", style = ButtonStyle.SECONDARY,
+                        onClick = { mainHandler.post { lastAnswer?.let { answer(it) } ?: home() } })
+                }
+            }
+        }
+    }
 
     /**
      * Glasses taps arrive on a background thread. Everything here (and the phone screen it updates) must run on
@@ -420,7 +462,9 @@ object Glasses {
                     lastAnswer?.takeIf { System.currentTimeMillis() - lastAt < 120_000 }) { say(it) }
                 say("Gemini: ${a.headline} (${(System.currentTimeMillis() - t0) / 100 / 10.0}s)")
                 lastAnswer = a; lastAt = System.currentTimeMillis(); lastMode = mode
+                lastPictures = emptyList()
                 answer(a)
+                if (a.pictures.isNotEmpty()) loadPictures(a)
                 reshow(1500)
                 // Speak once the answer can be seen too (the lens can be down for a few seconds after a photo).
                 withTimeoutOrNull(8000) { displayUp.first { it } }
