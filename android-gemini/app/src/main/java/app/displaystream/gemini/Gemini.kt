@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
 
 enum class Mode { LOOK, SPEAK, TRANSLATE }
 
-data class Answer(val headline: String, val bullets: List<String>, val spoken: String)
+data class Answer(val headline: String, val bullets: List<String>, val spoken: String, val pictures: List<String> = emptyList())
 
 object Gemini {
     const val DEFAULT_MODEL = "gemini-4-hydrogen"
@@ -40,7 +40,11 @@ object Gemini {
                 .put("items", JSONObject().put("type", "STRING"))
                 .put("description", "2 or 3 lines, each under 85 characters"))
             .put("spokenSummary", JSONObject().put("type", "STRING")
-                .put("description", "1 or 2 short sentences to read aloud")))
+                .put("description", "1 or 2 short sentences to read aloud"))
+            .put("pictures", JSONObject().put("type", "ARRAY")
+                .put("items", JSONObject().put("type", "STRING"))
+                .put("description", "Only if the person asks to see pictures, examples, kinds or types of something: " +
+                    "2 to 6 specific names to look up photos of on Wikipedia, e.g. 'Gala (apple)', 'Granny Smith'. Otherwise an empty list.")))
         .put("required", JSONArray(listOf("headline", "bullets", "spokenSummary")))
 
     /** Longest edge sent to Gemini: small text needs more pixels than a general scene. */
@@ -100,7 +104,7 @@ object Gemini {
         val prompt = buildString {
             when (mode) {
                 Mode.TRANSLATE -> append(BASE + "Read all visible text in the photo, translate it into clear English, and highlight prices, key items or warnings. Be brief.")
-                Mode.SPEAK -> append("$PROMPT The attached audio is the person's spoken question about what they are looking at. Answer that question directly, using up-to-date web knowledge if it helps.")
+                Mode.SPEAK -> append("$PROMPT The attached audio is the person's spoken question about what they are looking at. Answer that question directly, using up-to-date web knowledge if it helps. If they ask to see pictures or kinds of something, list them in pictures; the photos are shown separately, so keep the text short.")
                 Mode.LOOK -> append(PROMPT)
             }
             if (prev != null && mode == Mode.SPEAK)
@@ -143,10 +147,12 @@ object Gemini {
             }
             val j = JSONObject(text)
             val arr = j.getJSONArray("bullets")
+            val pics = j.optJSONArray("pictures")
             Answer(
                 j.getString("headline"),
                 (0 until arr.length()).map { arr.getString(it) },
                 j.optString("spokenSummary", j.getString("headline")),
+                if (pics == null) emptyList() else (0 until pics.length()).map { pics.getString(it) }.filter { it.isNotBlank() },
             )
         }
     }
