@@ -22,7 +22,7 @@ class Picture(val label: String, val caption: String, val bitmap: Bitmap)
  */
 object Pictures {
     private const val UA = "GeminiGlasses/0.2 (personal app; github.com/djlab9er/DisplayStream)"
-    private const val MAX_EDGE = 360
+    private const val MAX_EDGE = 240
     private val http = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS).callTimeout(15, TimeUnit.SECONDS).build()
 
