@@ -412,6 +412,7 @@ object Glasses {
         if (pics.isEmpty()) return
         val n = pics.size
         val p = pics[((i % n) + n) % n]
+        say("Showing picture ${(i % n) + 1}/$n: ${p.label} (${p.bitmap.width}x${p.bitmap.height})")
         show {
             flexBox(direction = Direction.COLUMN, gap = 8, padding = 16, background = FlexBoxBackground.CARD) {
                 image(bitmap = p.bitmap, sizePreset = ImageSize.FILL, cornerRadius = CornerRadius.MEDIUM)
